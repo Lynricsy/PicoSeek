@@ -1,9 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="logo-title logo-desc">
-  <style>:root{--book:#17616B;--check:#279C87;--ink:#FFFFFF}@media(prefers-color-scheme:dark){:root{--book:#8AD7DE;--check:#64D8B5;--ink:#153D43}}</style><title id="logo-title">PicoSeek 标志</title>
-  <desc id="logo-desc">展开的深青色书页与青绿色核验勾，代表回到文献原文核实证据。</desc>
-  <path fill="var(--book)" d="M40 51C66 46 90 50 108 61C116 66 120 69 120 78V191C120 198 116 201 110 197C88 185 63 185 42 190C35 192 32 189 32 182V61C32 55 34 52 40 51Z" />
-  <path stroke="var(--book)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" d="M144 76C165 61 188 56 216 60V82M216 150V182C189 177 165 182 144 194" />
-  <path stroke="var(--ink)" stroke-width="10" stroke-linecap="round" d="M56 84C71 83 84 86 98 92M56 112C71 111 84 114 98 120M56 140C71 139 84 142 98 148" />
-  <path stroke="var(--check)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" d="M148 123L172 147L223 96" />
-</svg>

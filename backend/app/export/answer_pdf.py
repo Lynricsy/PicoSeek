@@ -66,7 +66,7 @@ _HEADER = """
 <div style="width:100%;margin:0 18mm;padding-bottom:3mm;border-bottom:0.5px solid #E1DDD7;
  font:400 7.5pt/1.2 Inter,system-ui,sans-serif;color:#6B6157;display:flex;align-items:center;gap:4px">
   <img src="{logo}" style="width:10px;height:10px">
-  <span style="font-weight:600;color:#1F7583">PicoSeek</span>
+  <span style="font-weight:600;color:#1B63D6">PicoSeek</span>
   <span style="margin-left:auto;text-align:right">{question}</span>
 </div>
 """
@@ -83,8 +83,8 @@ _FOOTER = """
 
 @cache
 def _logo_data_uri() -> str:
-    data = base64.b64encode((HERE / "logo.svg").read_bytes()).decode("ascii")
-    return "data:image/svg+xml;base64," + data
+    data = base64.b64encode((HERE / "logo.png").read_bytes()).decode("ascii")
+    return "data:image/png;base64," + data
 
 
 @cache

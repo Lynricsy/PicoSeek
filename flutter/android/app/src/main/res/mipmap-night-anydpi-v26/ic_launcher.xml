@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 深色模式下的自适应图标：背景色由 values-night/colors.xml 给出，
-     前景换成深色版标识（浅青书页 + 深青文字），保证在深底上仍有对比。 -->
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/brand_canvas" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground_dark" />
-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
-</adaptive-icon>

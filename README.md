@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg" />
-    <img src="docs/assets/logo.svg" width="112" height="112" alt="PicoSeek：书页与证据核验勾" />
-  </picture>
+  <img src="docs/assets/logo.png" width="112" height="112" alt="PicoSeek：字母 P 与放大镜里的展开书页" />
 </p>
 
 # PicoSeek
@@ -11,23 +8,23 @@ PicoSeek 是一套医学文献证据问答系统：从临床或科研问题出�
 
 API 的请求、响应、错误与事件协议见 [API 协议文档](docs/api.md)；CLI 内核的详细用法见 [core/README.md](core/README.md)。
 
-品牌标志以展开的圆角书页与核验勾表达「回到文献原文核实证据」。透明底矢量资源：[浅色背景版](docs/assets/logo.svg)、[深色背景版](docs/assets/logo-dark.svg)、[单色版](docs/assets/logo-mono.svg)，均为 `256 × 256` 画布，无字体或外部资源依赖。深色背景版使用浅青书页与薄荷绿核验勾；单色版内联时可通过 CSS `color` 换色，作为独立图片使用时默认黑色。
+品牌标志以字母 P、放大镜与展开的书页表达「快速检索并回到文献原文」。透明底资源：[彩色版](docs/assets/logo.png)（`1024 × 1024` PNG）、[单色版](docs/assets/logo-mono.svg)（`256 × 256` 矢量，内联时可通过 CSS `color` 换色，作为独立图片使用时默认黑色）。彩色标志本身是浅深通用的，两种主题下共用同一张图，不再分浅色版与深色版。
 
 三端使用同一组品牌资源，应用内标志沿用各端现有主题机制，不另设主题开关：
 
 | 客户端 | 品牌入口与系统资源 |
 | --- | --- |
-| Web | 登录、会话恢复、桌面侧栏及折叠态、手机顶栏、问答首页；自适应 SVG favicon、ICO、主屏幕图标与 Web Manifest。应用内手动主题优先于系统设置。 |
-| Apple | 登录、会话恢复、问答首页、原生侧栏；图片集自动选择浅色/深色版本，iOS 应用图标提供常规、深色与着色版本，macOS 提供完整尺寸图标。系统启动屏使用动态背景色。 |
+| Web | 登录、会话恢复、桌面侧栏及折叠态、手机顶栏、问答首页；ICO 与 PNG favicon、主屏幕图标与 Web Manifest。应用内手动主题优先于系统设置。 |
+| Apple | 登录、会话恢复、问答首页、原生侧栏；图片集为单一通用图，iOS 应用图标提供常规、深色与着色版本，macOS 提供完整尺寸图标。系统启动屏使用动态背景色。 |
 | Flutter | 登录、会话恢复、侧栏及折叠态、手机顶栏、问答首页；Android 启动屏、自适应及主题单色图标，Windows ICO 与 Linux 窗口图标。应用内跟随 `ThemeMode`；启动器外观由操作系统决定。 |
 
-修改 SVG 母版后，在仓库根目录执行以下命令同步各端资源；依赖 Python 3.12+ 与 `rsvg-convert`（librsvg），无需额外 Python 包：
+更换或修版交付稿后，在仓库根目录执行以下命令同步各端资源；依赖 Python 3.12+、`dev` 依赖组（Pillow、NumPy、SciPy）与 `potrace`：
 
 ```bash
-python tools/generate_brand_assets.py
+uv run python tools/generate_brand_assets.py
 ```
 
-生成器以 `docs/assets/logo.svg` 为彩色母版、`docs/assets/logo-mono.svg` 为 Android 单色母版，输出平台所需 SVG、PNG 与多尺寸 ICO。生成资源随代码入库，正常构建客户端不需要图形转换工具；不要直接修改生成的图片。macOS、Windows 与 Linux 的桌面图标使用固定中性浅底，应用内 Logo 仍支持双主题。
+生成器以白底交付稿 `docs/assets/logo-source.png` 为唯一源：先解算出透明底母版 `docs/assets/logo.png`，再描摹出 Android 主题图标用的 `docs/assets/logo-mono.svg`，最后输出各端 PNG 与多尺寸 ICO。生成资源随代码入库，正常构建客户端不需要图形转换工具；不要直接修改生成的图片。iOS 深色图标、Android 深色画布使用深蓝底 `#0D1B2E`，其余应用图标使用白底。
 
 ## 仓库布局
 

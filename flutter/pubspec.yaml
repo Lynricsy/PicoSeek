@@ -60,11 +60,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # 品牌资源：唯一源 docs/assets/logo.svg，由 tools/generate_brand_assets.py 生成。
+  # 品牌资源：唯一源 docs/assets/logo-source.png，由 tools/generate_brand_assets.py 生成。
   # 2.0x / 3.0x 变体按目录约定自动解析，无需逐条声明。
   assets:
-    - assets/brand/logo-light.png
-    - assets/brand/logo-dark.png
+    - assets/brand/logo.png
     # Linux 运行时从 bundle 里按可执行文件相对路径读它作窗口图标。
     - assets/brand/app-icon.png
 

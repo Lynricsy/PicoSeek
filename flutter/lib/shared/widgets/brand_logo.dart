@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/tokens.dart';
 
-/// 品牌标识（圆角书页 + 核验勾）。
+/// 品牌标识（字母 P 与放大镜里的展开书页）。
 ///
-/// 资源为位图（`tools/generate_brand_assets.py` 由 `docs/assets/logo.svg` 生成），
-/// 按 `Theme.of(context).brightness` 选择浅/深两套，随主题切换即时生效；
-/// 1x/2x/3x 变体由 Flutter 的资源解析按屏幕密度挑选，不引入 SVG 运行库。
+/// 资源为透明底位图（`tools/generate_brand_assets.py` 由 `docs/assets/logo-source.png` 生成），
+/// 浅深主题共用同一张；1x/2x/3x 变体由 Flutter 的资源解析按屏幕密度挑选，不引入 SVG 运行库。
 class BrandLogo extends StatelessWidget {
   const BrandLogo({super.key, this.size = 28, this.semanticLabel});
 
@@ -18,9 +17,8 @@ class BrandLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
     return Image.asset(
-      dark ? 'assets/brand/logo-dark.png' : 'assets/brand/logo-light.png',
+      'assets/brand/logo.png',
       width: size,
       height: size,
       fit: BoxFit.contain,

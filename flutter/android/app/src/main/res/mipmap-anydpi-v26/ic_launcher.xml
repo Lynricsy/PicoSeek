@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 自适应图标（API 26+）：背景为品牌画布色，前景是留出安全区的品牌标识。
+<!-- 自适应图标（API 26+）：背景为品牌画布色（浅深由 values{,-night}/colors.xml 解析），
+     前景是留出安全区的品牌标识，透明底、浅深共用一张。
      mipmap-{density}/ic_launcher.png 保留给不支持自适应图标的旧启动器。
      monochrome（API 33+ 主题图标）由生成器从 docs/assets/logo-mono.svg 生成。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">

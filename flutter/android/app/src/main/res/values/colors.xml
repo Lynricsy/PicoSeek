@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 品牌画布底色（浅色）：与 tools/generate_brand_assets.py 生成的应用图标底色一致。 -->
-    <color name="brand_canvas">#FFF7FAF9</color>
+    <color name="brand_canvas">#FFFFFFFF</color>
 </resources>

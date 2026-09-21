@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 启动窗口背景（浅色）：品牌画布底色 + 居中品牌标识。
-     旧版 Flutter 模板的白底占位会在冷启动时闪一下默认图标，这里直接画品牌图。 -->
+<!-- 启动窗口背景：品牌画布底色 + 居中品牌标识。底色由 values{,-night}/colors.xml 按主题解析，
+     标识是透明底位图，浅深共用一张。旧版 Flutter 模板的白底占位会在冷启动时闪一下默认图标。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/brand_canvas" />
     <item>
