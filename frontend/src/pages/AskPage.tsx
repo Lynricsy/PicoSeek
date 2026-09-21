@@ -117,8 +117,10 @@ export default function AskPage() {
     setQuestion(text)
     inputRef.current?.focus()
   }
-  // 智能体的已完成答案下方是「续接对话」，不是新建：引擎与筛选都由会话决定
-  const followingUp = answer?.engine === 'codex' && answer.status === 'ready'
+  // 智能体与文献解读的已完成答案下方是「继续提问」，不是新建：引擎与筛选都由会话决定
+  const followingUp =
+    (answer?.engine === 'codex' || answer?.engine === 'interpret') &&
+    answer.status === 'ready'
   const composer = {
     value: question,
     onChange: setQuestion,
@@ -135,6 +137,8 @@ export default function AskPage() {
     onEngineChange: (engine: FilterState['engine']) =>
       update({ ...filters, engine }),
     mode: (followingUp ? 'followup' : 'ask') as 'ask' | 'followup',
+    sessionEngine: (answer?.engine === 'interpret' ? 'interpret' : 'codex') as
+      'codex' | 'interpret',
   }
   const closeReader = () =>
     setSearchParams((previous) => {

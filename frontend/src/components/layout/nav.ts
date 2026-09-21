@@ -1,4 +1,5 @@
 import {
+  BookOpenText,
   Database,
   History,
   KeyRound,
@@ -22,6 +23,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: '工作台',
     items: [
       { to: '/', label: '提问', icon: MessageSquareText, end: true },
+      { to: '/interpret', label: '解读', icon: BookOpenText },
       { to: '/history', label: '历史', icon: History },
     ],
   },

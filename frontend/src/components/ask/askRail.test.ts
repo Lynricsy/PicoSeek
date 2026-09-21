@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_LIVE } from '@/lib/jobLive'
-import { askRailNodes } from './askRail'
+import { askRailNodes, interpretSteps } from './askRail'
 
 describe('askRailNodes', () => {
   it('把写库排在综合成稿之后，并在答案出来前保持未开始', () => {
@@ -52,5 +52,24 @@ describe('askRailNodes', () => {
       status: 'failed',
       hint: '写入失败，答案不受影响',
     })
+  })
+
+  it('文献解读只有解析与生成两节点，第二节点按模式换文案', () => {
+    const overview = askRailNodes(EMPTY_LIVE, {
+      useKb: true,
+      kb: null,
+      steps: interpretSteps('overview'),
+    })
+    expect(overview.map((n) => [n.key, n.label])).toEqual([
+      ['fulltext', '解析 PDF'],
+      ['synthesize', '梳理文献关系'],
+      ['kb', '写入知识库'],
+    ])
+    const qa = askRailNodes(EMPTY_LIVE, {
+      useKb: false,
+      kb: null,
+      steps: interpretSteps('qa'),
+    })
+    expect(qa.map((n) => n.label)).toEqual(['解析 PDF', '生成回答'])
   })
 })

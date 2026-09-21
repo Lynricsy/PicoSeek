@@ -37,7 +37,7 @@ import { ProgressPipeline } from './ProgressPipeline'
 import { SourceCard } from './SourceCard'
 import { SourceList } from './SourceList'
 import { StageRail } from './StageRail'
-import { askRailNodes } from './askRail'
+import { askRailNodes, interpretSteps } from './askRail'
 import { EngineBadge } from './EnginePicker'
 import { ThreadNav } from './ThreadNav'
 import { TraceList } from './TraceList'
@@ -64,7 +64,12 @@ export function AnswerView({
 }) {
   const active = answer.status === 'queued' || answer.status === 'running'
   const isCodex = answer.engine === 'codex'
-  const thread = useAnswerThread(answer.id, isCodex)
+  const isInterpret = answer.engine === 'interpret'
+  // 解读只有两段轨道；综述与问答的第二节点文案不同
+  const pipeline = isInterpret
+    ? interpretSteps(String(answer.options?.mode ?? ''))
+    : undefined
+  const thread = useAnswerThread(answer.id, isCodex || isInterpret)
   const turns = thread.data ?? []
   const trace = (answer.trace ?? []).map(toolCallOf).filter((c) => c !== null)
   const useKb = !isCodex && answer.options?.use_kb !== false
@@ -79,7 +84,7 @@ export function AnswerView({
     <article className="@container/answer mx-auto w-full max-w-[760px] px-5 py-8 md:px-8 md:py-10">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <StatusBadge status={answer.status} />
-        <EngineBadge engine={isCodex ? 'codex' : 'ask'} />
+        <EngineBadge engine={answer.engine ?? 'ask'} />
         <time dateTime={answer.created_at} title={dateTime(answer.created_at)}>
           {relativeTime(answer.created_at)}
         </time>
@@ -113,11 +118,16 @@ export function AnswerView({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onReask}>
-              <RotateCcw />
-              沿用此次筛选重新提问
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {/* 解读会话没有筛选条件，也没有可复用的检索问题：重新提问对它无意义 */}
+            {!isInterpret && (
+              <>
+                <DropdownMenuItem onSelect={onReask}>
+                  <RotateCcw />
+                  沿用此次筛选重新提问
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem
               variant="destructive"
               disabled={active}
@@ -169,7 +179,8 @@ export function AnswerView({
             jobId={answer.job_id ?? null}
             useKb={useKb}
             kb={kb}
-            engine={isCodex ? 'codex' : 'ask'}
+            engine={answer.engine ?? 'ask'}
+            pipeline={pipeline}
           />
           {!!live.search?.papers.length && (
             <section className="mt-8">
@@ -197,7 +208,12 @@ export function AnswerView({
         <div className="space-y-10">
           {kb && (
             <StageRail
-              nodes={askRailNodes(live, { useKb, kb, settled: true })}
+              nodes={askRailNodes(live, {
+                useKb,
+                kb,
+                settled: true,
+                steps: pipeline,
+              })}
               progress={
                 kb.status === 'running' && kb.total > 0
                   ? {
@@ -234,12 +250,14 @@ export function AnswerView({
               {!!answer.kb_hits?.length && (
                 <KbSupplement hits={answer.kb_hits} />
               )}
-              <div className="border-t pt-6">
-                <Button variant="outline" size="sm" onClick={onReask}>
-                  <RotateCcw />
-                  沿用此次筛选重新提问
-                </Button>
-              </div>
+              {!isInterpret && (
+                <div className="border-t pt-6">
+                  <Button variant="outline" size="sm" onClick={onReask}>
+                    <RotateCcw />
+                    沿用此次筛选重新提问
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </div>

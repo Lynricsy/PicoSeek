@@ -21,8 +21,10 @@ export type ComposerProps = {
   onOpenFilters: (() => void) | null
   engine: Engine
   onEngineChange: (engine: Engine) => void
-  /** followup：续接已有 codex 会话，引擎锁定且不再展示筛选芯片。 */
+  /** followup：续接已有会话，引擎锁定且不再展示筛选芯片。 */
   mode: 'ask' | 'followup'
+  /** 追问时所属会话的引擎，决定锁定态文案与占位提示。 */
+  sessionEngine?: 'codex' | 'interpret'
 }
 
 export function Composer({
@@ -38,6 +40,7 @@ export function Composer({
   engine,
   onEngineChange,
   mode,
+  sessionEngine,
 }: ComposerProps) {
   const hero = variant === 'hero'
   useLayoutEffect(() => {
@@ -75,7 +78,9 @@ export function Composer({
         )}
         placeholder={
           mode === 'followup'
-            ? '追问这个话题…'
+            ? sessionEngine === 'interpret'
+              ? '就这些文献继续提问…'
+              : '追问这个话题…'
             : hero
               ? '例如：SGLT2 抑制剂对 HFpEF 患者有什么获益？'
               : '追问或提出新问题…'
@@ -99,7 +104,7 @@ export function Composer({
           <EnginePicker
             value={engine}
             onChange={onEngineChange}
-            locked={mode === 'followup'}
+            locked={mode === 'followup' ? (sessionEngine ?? 'codex') : false}
           />
           {mode === 'ask' &&
             (onOpenFilters ? (

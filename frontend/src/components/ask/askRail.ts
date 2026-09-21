@@ -21,6 +21,13 @@ export const steps: [StageKey, string][] = [
   ['read', '逐篇阅读'],
   ['synthesize', '综合成稿'],
 ]
+
+/** 文献解读只有两段：文献是用户给的，没有检索与逐篇精读。 */
+export const interpretSteps = (mode: string): [StageKey, string][] => [
+  ['fulltext', '解析 PDF'],
+  ['synthesize', mode === 'overview' ? '梳理文献关系' : '生成回答'],
+]
+
 const KB_LABEL = '写入知识库'
 
 function kbNode(kb: KbBackground | null): RailNode {
@@ -58,9 +65,15 @@ export function askRailNodes(
     useKb,
     kb,
     settled,
-  }: { useKb: boolean; kb: KbBackground | null; settled?: boolean },
+    steps: pipeline = steps,
+  }: {
+    useKb: boolean
+    kb: KbBackground | null
+    settled?: boolean
+    steps?: [StageKey, string][]
+  },
 ): RailNode[] {
-  const nodes: RailNode[] = steps.map(([stage, label]) => ({
+  const nodes: RailNode[] = pipeline.map(([stage, label]) => ({
     key: stage,
     label,
     status:

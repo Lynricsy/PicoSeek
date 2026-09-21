@@ -68,13 +68,16 @@ export function ProgressPipeline({
   useKb,
   kb,
   engine,
+  pipeline = steps,
 }: {
   live: JobLive
   connection: Connection
   jobId: string | null
   useKb: boolean
   kb: KbBackground | null
-  engine: 'ask' | 'codex'
+  engine: 'ask' | 'codex' | 'interpret'
+  /** 自定义流水线节点；默认是 ask 的五段式。 */
+  pipeline?: [StageKey, string][]
 }) {
   const cancel = useMutation({
     mutationFn: cancelJob,
@@ -87,7 +90,7 @@ export function ProgressPipeline({
   }, [live.logs.length])
   const isCodex = engine === 'codex'
   const connectionNote = connections[connection]
-  const finished = steps.filter(
+  const finished = pipeline.filter(
     ([stage]) => live.stages[stage]?.status === 'finished',
   )
   const progress =
@@ -98,7 +101,11 @@ export function ProgressPipeline({
     <section className="rounded-xl border bg-card p-5 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-medium">
-          {isCodex ? '智能体检索' : '证据流水线'}
+          {engine === 'interpret'
+            ? '文献解读'
+            : isCodex
+              ? '智能体检索'
+              : '证据流水线'}
         </p>
         {connectionNote && (
           <span
@@ -140,7 +147,7 @@ export function ProgressPipeline({
         <>
           <StageRail
             className="mt-6"
-            nodes={askRailNodes(live, { useKb, kb })}
+            nodes={askRailNodes(live, { useKb, kb, steps: pipeline })}
             progress={progress}
           />
           {finished.length > 0 && (

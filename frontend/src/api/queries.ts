@@ -1,6 +1,7 @@
 import { MutationCache, QueryClient, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { api, dataOf, toFormData } from './client'
+import { api, dataOf } from './client'
+import { toFormData } from './multipart'
 import { ApiError, problemMessage } from './errors'
 import { filenameFromDisposition, saveBlob } from '@/lib/download'
 import type { components, paths } from './schema'
@@ -362,6 +363,10 @@ export const uploadPaper = (body: {
   year?: string
   authors?: string
 }) => dataOf(api.POST('/v1/papers/upload', multipart(body)))
+export const createInterpretation = (body: {
+  files: File[]
+  question?: string
+}) => dataOf(api.POST('/v1/answers/interpret', multipart(body)))
 export const ingestDoi = ({ doi }: { doi: string }) =>
   dataOf(api.POST('/v1/papers/ingest', { body: { doi } }))
 export type RelatedKind = 'citations' | 'references' | 'recommendations'

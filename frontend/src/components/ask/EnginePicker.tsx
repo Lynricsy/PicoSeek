@@ -1,4 +1,11 @@
-import { ChevronDown, Sparkles, Workflow, type LucideIcon } from 'lucide-react'
+import {
+  BookOpenText,
+  ChevronDown,
+  Sparkles,
+  Workflow,
+  type LucideIcon,
+} from 'lucide-react'
+import type { components } from '@/api/schema'
 import { cn } from 'cn'
 import type { Engine } from '@/lib/filters'
 import {
@@ -29,6 +36,19 @@ const ENGINES: {
   },
 ]
 
+/** 会话引擎：interpret 只能由 `/answers/interpret` 创建，故不在 `ENGINES` 里。 */
+export type AnswerEngine = NonNullable<
+  components['schemas']['AnswerSummary']['engine']
+>
+const LOCKED: Record<'codex' | 'interpret', [LucideIcon, string]> = {
+  codex: [Sparkles, '智能体 · 续接对话'],
+  interpret: [BookOpenText, '文献解读 · 继续提问'],
+}
+const BADGES: Record<'codex' | 'interpret', [LucideIcon, string]> = {
+  codex: [Sparkles, '智能体'],
+  interpret: [BookOpenText, '解读'],
+}
+
 const triggerClass =
   'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground'
 
@@ -39,16 +59,18 @@ export function EnginePicker({
 }: {
   value: Engine
   onChange: (engine: Engine) => void
-  /** 追问态：引擎由会话决定，不能中途换。 */
-  locked: boolean
+  /** 追问态：引擎由会话决定，不能中途换；`false` 表示可选。 */
+  locked: false | 'codex' | 'interpret'
 }) {
-  if (locked)
+  if (locked) {
+    const [LockedIcon, text] = LOCKED[locked]
     return (
       <span className={triggerClass} title="追问会沿用本次会话的引擎">
-        <Sparkles className="size-3.5 shrink-0" />
-        智能体 · 续接对话
+        <LockedIcon className="size-3.5 shrink-0" />
+        {text}
       </span>
     )
+  }
   const current = ENGINES.find((e) => e.value === value) ?? ENGINES[0]
   const Icon = current.icon
   return (
@@ -85,13 +107,14 @@ export function EnginePicker({
   )
 }
 
-/** 只有智能体才挂徽标：标准引擎是默认值，标出来只是噪音。 */
-export function EngineBadge({ engine }: { engine: Engine }) {
-  if (engine !== 'codex') return null
+/** 标准引擎是默认值，标出来只是噪音；另外两个引擎各自挂徽标。 */
+export function EngineBadge({ engine }: { engine: AnswerEngine }) {
+  if (engine === 'ask') return null
+  const [Icon, text] = BADGES[engine]
   return (
     <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-      <Sparkles className="size-3 shrink-0" />
-      智能体
+      <Icon className="size-3 shrink-0" />
+      {text}
     </span>
   )
 }

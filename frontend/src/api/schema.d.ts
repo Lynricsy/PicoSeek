@@ -177,6 +177,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/answers/interpret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上传 PDF 创建文献解读会话
+         * @description 一组 PDF = 一条会话：docset id 就是 `thread_id`，后续追问复用同一份解析产物。
+         *
+         *     多篇且带问题时一次入队两轮（先综述、后回答），arq 是 FIFO 且 worker 串行，
+         *     所以第二轮读得到第一轮的历史。
+         */
+        post: operations["create_interpretation_v1_answers_interpret_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/answers/{answer_id}/followup": {
         parameters: {
             query?: never;
@@ -187,8 +210,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 在智能体会话上追问
-         * @description 在同一个 codex thread 上再跑一轮；选项沿用被续接的那一轮，只换问题。
+         * 在智能体或文献解读会话上追问
+         * @description 在同一个 thread 上再跑一轮；选项沿用被续接的那一轮，只换问题。
          */
         post: operations["followup_answer_v1_answers__answer_id__followup_post"];
         delete?: never;
@@ -754,7 +777,7 @@ export interface components {
              * @default ask
              * @enum {string}
              */
-            engine?: "ask" | "codex";
+            engine?: "ask" | "codex" | "interpret";
             /** Filters Label */
             filters_label?: string | null;
             /** N Papers */
@@ -937,7 +960,7 @@ export interface components {
              * @default abstract
              * @enum {string}
              */
-            source?: "pmc" | "pdf" | "inst" | "abstract";
+            source?: "pmc" | "pdf" | "inst" | "upload" | "abstract";
             /** Relevance */
             relevance?: number | null;
             /**
@@ -1015,7 +1038,7 @@ export interface components {
              * @default abstract
              * @enum {string}
              */
-            source?: "pmc" | "pdf" | "inst" | "abstract";
+            source?: "pmc" | "pdf" | "inst" | "upload" | "abstract";
             /** Relevance */
             relevance?: number | null;
             /**
@@ -1077,7 +1100,7 @@ export interface components {
              * @default ask
              * @enum {string}
              */
-            engine?: "ask" | "codex";
+            engine?: "ask" | "codex" | "interpret";
             /** Filters Label */
             filters_label?: string | null;
             /** N Papers */
@@ -1096,6 +1119,16 @@ export interface components {
             n_turns?: number;
             /** Root Question */
             root_question?: string | null;
+        };
+        /** Body_create_interpretation_v1_answers_interpret_post */
+        Body_create_interpretation_v1_answers_interpret_post: {
+            /** Files */
+            files: string[];
+            /**
+             * Question
+             * @default
+             */
+            question?: string;
         };
         /** Body_put_state_v1_paywall_state_put */
         Body_put_state_v1_paywall_state_put: {
@@ -1289,7 +1322,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "ask" | "codex" | "kb_reindex" | "paper_ingest" | "answer_kb";
+            kind: "ask" | "codex" | "interpret" | "kb_reindex" | "paper_ingest" | "answer_kb";
             /**
              * Status
              * @enum {string}
@@ -2565,6 +2598,48 @@ export interface operations {
             };
         };
     };
+    create_interpretation_v1_answers_interpret_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_create_interpretation_v1_answers_interpret_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Answer"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Problem Details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     followup_answer_v1_answers__answer_id__followup_post: {
         parameters: {
             query?: never;
@@ -2892,7 +2967,7 @@ export interface operations {
     list_jobs_v1_jobs_get: {
         parameters: {
             query?: {
-                kind?: ("ask" | "codex" | "kb_reindex" | "paper_ingest" | "answer_kb") | null;
+                kind?: ("ask" | "codex" | "interpret" | "kb_reindex" | "paper_ingest" | "answer_kb") | null;
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled") | null;
                 limit?: number;
                 offset?: number;

@@ -30,15 +30,6 @@ api.use({
     return response
   },
 })
-/** multipart 请求体：File 原样带上，其余转成字符串；空值直接跳过（后端有默认值）。 */
-export function toFormData(body: unknown): FormData {
-  const form = new FormData()
-  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    if (value === undefined || value === null) continue
-    form.append(key, value instanceof File ? value : String(value))
-  }
-  return form
-}
 export async function dataOf<T>(request: Promise<{ data?: T }>): Promise<T> {
   const result = await request
   if (result.data === undefined) throw new Error('Missing response data')

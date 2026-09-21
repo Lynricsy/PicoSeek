@@ -6,6 +6,7 @@ import { AppShell } from '@/components/layout/AppShell'
 const AskPage = lazy(() => import('@/pages/AskPage'))
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const HistoryPage = lazy(() => import('@/pages/HistoryPage'))
+const InterpretPage = lazy(() => import('@/pages/InterpretPage'))
 const AccountPage = lazy(() => import('@/pages/AccountPage'))
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'))
 const InstitutionPage = lazy(() => import('@/pages/admin/InstitutionPage'))
@@ -25,6 +26,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route index element={<AskPage />} />
             <Route path="/a/:answerId" element={<AskPage />} />
+            <Route path="/interpret" element={<InterpretPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/library" element={<LibraryPage />} />

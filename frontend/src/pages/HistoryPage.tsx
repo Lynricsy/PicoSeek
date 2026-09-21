@@ -245,11 +245,7 @@ export default function HistoryPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge status={answer.status} />
-                            <EngineBadge
-                              engine={
-                                answer.engine === 'codex' ? 'codex' : 'ask'
-                              }
-                            />
+                            <EngineBadge engine={answer.engine ?? 'ask'} />
                             {(answer.n_turns ?? 1) > 1 && (
                               <Pill>{answer.n_turns} 轮</Pill>
                             )}
