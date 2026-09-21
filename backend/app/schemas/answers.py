@@ -11,7 +11,9 @@ from .kb import KbHit
 from .papers import Fact, Paragraph, VerifiedQuote
 
 AnswerStatus = Literal["queued", "running", "ready", "failed", "cancelled"]
-AnswerEngine = Literal["ask", "codex"]
+AnswerEngine = Literal["ask", "codex", "interpret"]
+# JSON 入口不接受 interpret：文献解读必须带文件，只能走 multipart 的 /answers/interpret
+CreateEngine = Literal["ask", "codex"]
 TERMINAL_ANSWER_STATUSES = frozenset({"ready", "failed", "cancelled"})
 
 
@@ -31,7 +33,7 @@ class AnswerCreate(BaseModel):
     """
 
     question: str = Field(min_length=1, max_length=2000)
-    engine: AnswerEngine = "ask"
+    engine: CreateEngine = "ask"
     papers: int = Field(default=8, ge=1, le=30)
     years: int | None = Field(default=None, ge=1, le=50)
     year_from: int | None = Field(default=None, ge=1900, le=2100)
@@ -88,7 +90,7 @@ class AnswerPaper(BaseModel):
     authors: str = ""
     quartile: str = ""
     rank_label: str = ""
-    source: Literal["pmc", "pdf", "inst", "abstract"] = "abstract"
+    source: Literal["pmc", "pdf", "inst", "upload", "abstract"] = "abstract"
     relevance: int | None = None
     n_paragraphs: int = 0
     n_citations: int = 0

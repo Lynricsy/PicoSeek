@@ -11,11 +11,14 @@ import os
 import shutil
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import APIRouter, Depends, File, Form, Path, Query, Response, UploadFile
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from interpret import OVERVIEW_QUESTION
+
 from ..auth import Principal, require
+from ..config import settings
 from ..deps import get_arq, get_db
 from ..errors import ApiError
 from ..export.answer_pdf import build_answer_html, export_filename, render_pdf
@@ -30,7 +33,9 @@ from ..schemas.answers import (
     FollowupCreate,
 )
 from ..schemas.common import MarkdownResponse, Page, PdfResponse
+from ..services import interpret as interpret_service
 from ..services import jobs as jobs_service
+from ..services import papers as papers_service
 from ..services.answers import (
     answer_paths,
     detail,
@@ -51,6 +56,13 @@ def _row(db: Session, answer_id: str, principal: Principal) -> AnswerRow:
     if row is None or not (principal.is_admin or row.user_id == principal.user_id):
         raise ApiError(404, "not_found", f"answer {answer_id!r} not found")
     return row
+
+
+def _interpret_paper_path(row: AnswerRow, n: int, suffix: str = ".md") -> str:
+    """文献解读的原文快照在 docset 目录里，编号上界来自创建时记录的文件数。"""
+    if not row.thread_id or not 1 <= n <= int((row.options or {}).get("n_files") or 0):
+        raise ApiError(404, "not_found", f"answer {row.id!r} has no paper #{n}")
+    return interpret_service.paper_path(row.thread_id, n, suffix)
 
 
 @router.post("/answers", status_code=202, response_model=Answer, summary="创建问答任务")
@@ -75,18 +87,83 @@ async def create_answer(payload: AnswerCreate, response: Response,
     return detail(db, row)
 
 
+@router.post("/answers/interpret", status_code=202, response_model=Answer,
+             summary="上传 PDF 创建文献解读会话")
+async def create_interpretation(response: Response,
+                                files: list[UploadFile] = File(...),
+                                question: str = Form("", max_length=2000),
+                                db: Session = Depends(get_db), arq=Depends(get_arq),  # noqa: ANN001
+                                principal: Principal = Depends(require())) -> Answer:
+    """一组 PDF = 一条会话：docset id 就是 `thread_id`，后续追问复用同一份解析产物。
+
+    多篇且带问题时一次入队两轮（先综述、后回答），arq 是 FIFO 且 worker 串行，
+    所以第二轮读得到第一轮的历史。
+    """
+    question = question.strip()
+    limit = settings.interpret_max_files
+    if not files or len(files) > limit:
+        raise ApiError(422, "validation_error", f"请上传 1..{limit} 个 PDF")
+    if len(files) == 1 and not question:
+        raise ApiError(422, "validation_error", "单篇解读需要提供问题")
+    # 多篇 + 问题会一次占两个名额：整批判定，避免只入队半条会话
+    turns = 2 if (len(files) >= 2 and question) else 1
+    jobs_service.ensure_capacity(db, principal, n=turns)
+
+    thread_id = jobs_service.new_id()
+    directory = interpret_service.docset_dir(thread_id)
+    os.makedirs(directory, exist_ok=True)
+    manifest: list[dict] = []
+    try:
+        for i, upload in enumerate(files, 1):
+            dest = os.path.join(directory, f"{i}.pdf")
+            await papers_service.save_upload(upload, dest, settings.upload_max_mb)
+            manifest.append({"n": i, "filename": os.path.basename(upload.filename or f"{i}.pdf")[:200],
+                             "bytes": os.path.getsize(dest)})
+        interpret_service.write_manifest(thread_id, manifest)
+    except BaseException:
+        shutil.rmtree(directory, ignore_errors=True)   # 校验失败不留孤儿 docset
+        raise
+
+    label = interpret_service.filters_label(len(files))
+    mode = "overview" if len(files) >= 2 else "qa"
+    options = {"engine": "interpret", "mode": mode,
+               "question": question if mode == "qa" else OVERVIEW_QUESTION,
+               "n_files": len(files), "use_kb": True}
+    row = AnswerRow(id=jobs_service.new_id(), job_id=None, user_id=principal.user_id,
+                    status="queued", question=options["question"], queries=[], options=options,
+                    papers=[], citations=[], kb_hits=[], trace=[],
+                    thread_id=thread_id, filters_label=label)
+    await jobs_service.enqueue(arq, db, kind="interpret",
+                               params={"answer_id": row.id, **options},
+                               user_id=principal.user_id, fn_name="run_interpret_job", answer=row)
+    if turns == 2:
+        # 综述写库、追问不再重复写：同一组 PDF 只入库一次
+        options2 = {**options, "mode": "qa", "question": question, "use_kb": False}
+        second = AnswerRow(id=jobs_service.new_id(), job_id=None, user_id=principal.user_id,
+                           status="queued", question=question, queries=[], options=options2,
+                           papers=[], citations=[], kb_hits=[], trace=[],
+                           parent_id=row.id, thread_id=thread_id, filters_label=label)
+        await jobs_service.enqueue(arq, db, kind="interpret",
+                                   params={"answer_id": second.id, **options2},
+                                   user_id=principal.user_id, fn_name="run_interpret_job",
+                                   answer=second)
+    db.refresh(row)
+    response.headers["Location"] = f"/v1/answers/{row.id}"
+    return detail(db, row)
+
+
 @router.post("/answers/{answer_id}/followup", status_code=202, response_model=Answer,
-             summary="在智能体会话上追问")
+             summary="在智能体或文献解读会话上追问")
 async def followup_answer(answer_id: str, payload: FollowupCreate, response: Response,
                           db: Session = Depends(get_db), arq=Depends(get_arq),  # noqa: ANN001
                           principal: Principal = Depends(require())) -> Answer:
-    """在同一个 codex thread 上再跑一轮；选项沿用被续接的那一轮，只换问题。"""
+    """在同一个 thread 上再跑一轮；选项沿用被续接的那一轮，只换问题。"""
     row = _row(db, answer_id, principal)
     if row.user_id != principal.user_id:
         # 管理员看得到别人的答案，但会话是别人的：续下去会污染对方的历史
         raise ApiError(403, "forbidden", "只有发起人可以追问")
-    if row.engine != "codex":
-        raise ApiError(409, "conflict", "只有智能体引擎的答案支持追问")
+    if row.engine not in ("codex", "interpret"):
+        raise ApiError(409, "conflict", "只有智能体或文献解读的答案支持追问")
     thread = thread_rows(db, row)
     if any(r.status in ("queued", "running") for r in thread):
         raise ApiError(409, "thread_busy", "上一轮还在进行中，稍后再追问")
@@ -95,14 +172,19 @@ async def followup_answer(answer_id: str, payload: FollowupCreate, response: Res
         raise ApiError(409, "not_ready", "这轮对话还没有可以续接的回合")
     parent = ready[-1]            # 永远接在最后一个成功回合上，而不是请求路径里的那一行
     jobs_service.ensure_capacity(db, principal)
-    options = {**(parent.options or {}), "question": payload.question, "engine": "codex"}
+    options = {**(parent.options or {}), "question": payload.question, "engine": parent.engine}
+    if parent.engine == "interpret":
+        # docset 已经在首轮入过库，追问只读不写
+        options.update(mode="qa", use_kb=False)
+    kind, fn_name = (("interpret", "run_interpret_job") if parent.engine == "interpret"
+                     else ("codex", "run_codex_job"))
     new_id = jobs_service.new_id()
     new_row = AnswerRow(id=new_id, job_id=None, user_id=principal.user_id, status="queued",
                         question=payload.question, queries=[], options=options, papers=[],
-                        citations=[], kb_hits=[], trace=[],
+                        citations=[], kb_hits=[], trace=[], filters_label=parent.filters_label,
                         parent_id=parent.id, thread_id=parent.thread_id)
-    await jobs_service.enqueue(arq, db, kind="codex", params={"answer_id": new_id, **options},
-                               user_id=principal.user_id, fn_name="run_codex_job", answer=new_row)
+    await jobs_service.enqueue(arq, db, kind=kind, params={"answer_id": new_id, **options},
+                               user_id=principal.user_id, fn_name=fn_name, answer=new_row)
     db.refresh(new_row)
     response.headers["Location"] = f"/v1/answers/{new_id}"
     return detail(db, new_row)
@@ -198,10 +280,13 @@ async def get_answer_pdf(answer_id: str, db: Session = Depends(get_db),
 def get_answer_paper_markdown(answer_id: str, n: int = Path(ge=1), db: Session = Depends(get_db),
                               principal: Principal = Depends(require())) -> MarkdownResponse:
     row = _row(db, answer_id, principal)
-    stem = paper_stems(row).get(n)
-    if stem is None:
-        raise ApiError(404, "not_found", f"answer {answer_id!r} has no paper #{n}")
-    path = paper_artifact_path(answer_id, stem)
+    if row.engine == "interpret":
+        path = _interpret_paper_path(row, n)
+    else:
+        stem = paper_stems(row).get(n)
+        if stem is None:
+            raise ApiError(404, "not_found", f"answer {answer_id!r} has no paper #{n}")
+        path = paper_artifact_path(answer_id, stem)
     try:
         with open(path, encoding="utf-8") as f:
             return MarkdownResponse(f.read(), headers={"Cache-Control": "no-store"})
@@ -217,6 +302,18 @@ def get_answer_paper(answer_id: str, n: int = Path(ge=1), db: Session = Depends(
     paper = next((p for p in (row.papers or []) if p.get("n") == n), None)
     if paper is None:
         raise ApiError(404, "not_found", f"answer {answer_id!r} has no paper #{n}")
+    if row.engine == "interpret":
+        # docset 里没有 PICOS 笔记与逐条核实引文；事实由后台入库任务写出后才可见
+        with open(_interpret_paper_path(row, n), encoding="utf-8") as f:
+            fulltext_md = f.read()
+        facts = (read_json(interpret_service.docset_file(row.thread_id, f"kb-facts-{n}.json"),
+                           default={}) or {}).get("facts", [])
+        return AnswerPaperDetail(
+            **paper, notes_md="", citations=[], facts=facts,
+            paragraphs=read_json(interpret_service.paper_path(row.thread_id, n, "_paragraphs.json"),
+                                 default=[]),
+            fulltext_md=fulltext_md,
+        )
     # 全文和元数据都限制在本次阅读目录，不从可被覆盖的 library 回退。
     stem = paper.get("pmid") or "paper"
     notes_path = paper_artifact_path(answer_id, stem, "_notes.md")
@@ -245,9 +342,15 @@ def delete_answer(answer_id: str, db: Session = Depends(get_db),
     if row.status not in TERMINAL_ANSWER_STATUSES:
         raise ApiError(409, "conflict", f"answer {answer_id!r} is {row.status}; cancel its job first")
     md_path, papers_dir = answer_paths(answer_id)
+    # 删除后行会失效，清理 docset 需要的字段必须先取出来
+    docset_id = row.thread_id if row.engine == "interpret" else None
     db.delete(row)
     db.commit()
     shutil.rmtree(papers_dir, ignore_errors=True)
+    if docset_id and not db.scalar(
+            select(func.count(AnswerRow.id)).where(AnswerRow.thread_id == docset_id)):
+        # 会话的最后一轮被删掉了：上传的 PDF 与解析产物一起清掉（已入库的副本不受影响）
+        interpret_service.remove_docset(docset_id)
     try:
         os.remove(md_path)
     except FileNotFoundError:

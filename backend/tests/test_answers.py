@@ -530,3 +530,168 @@ def test_answer_and_all_run_materials_are_private(client, snapshot_root, owner):
     assert directory.exists()
     assert client.delete(paths[0], headers=auth(ADMIN_TOKEN)).status_code == 204
     assert not directory.exists()
+
+
+# ---------------------------------------------------------------- 文献解读
+PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n%%EOF\n"
+
+
+def _pdf(name: str = "a.pdf"):
+    return ("files", (name, PDF_BYTES, "application/pdf"))
+
+
+def _interpret(client, files, question: str | None = None, token=OTHER_TOKEN):
+    data = {} if question is None else {"question": question}
+    return client.post("/v1/answers/interpret", files=files, data=data, headers=auth(token))
+
+
+def _docsets(data_root: Path) -> list[Path]:
+    directory = data_root / "docsets"
+    return sorted(p for p in directory.iterdir()) if directory.exists() else []
+
+
+def test_interpret_single_pdf_requires_question(client, data_root: Path):
+    before = _docsets(data_root)
+
+    r = _interpret(client, [_pdf()])
+
+    assert r.status_code == 422
+    assert r.json()["code"] == "validation_error"
+    assert _docsets(data_root) == before, "被拒的请求不该留下 docset 目录"
+
+
+def test_interpret_single_pdf_creates_a_qa_turn(client, arq, data_root: Path):
+    r = _interpret(client, [_pdf()], "样本量多少")
+
+    assert r.status_code == 202
+    body = r.json()
+    assert body["engine"] == "interpret"
+    assert body["question"] == "样本量多少"
+    assert body["filters_label"] == "文献解读 · 1 篇 PDF"
+    assert body["options"]["mode"] == "qa"
+    assert body["options"]["use_kb"] is True
+    assert body["options"]["n_files"] == 1
+    thread_id = None
+    with SessionLocal() as db:
+        row = db.get(Answer, body["id"])
+        thread_id = row.thread_id
+        assert thread_id and row.parent_id is None
+        assert db.get(Job, body["job_id"]).kind == "interpret"
+    assert arq.calls[-1][0] == "run_interpret_job"
+    docset = data_root / "docsets" / thread_id
+    assert (docset / "1.pdf").read_bytes() == PDF_BYTES
+    manifest = json.loads((docset / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["files"] == [{"n": 1, "filename": "a.pdf", "bytes": len(PDF_BYTES)}]
+
+
+def test_interpret_group_queues_overview_then_the_question(client, arq):
+    r = _interpret(client, [_pdf("a.pdf"), _pdf("b.pdf")], "两篇的样本量分别是多少")
+
+    assert r.status_code == 202
+    first = r.json()
+    assert first["question"] == "梳理这组文献的组织关系与差异"
+    assert first["options"]["mode"] == "overview"
+    assert first["options"]["use_kb"] is True
+
+    thread = client.get(f"/v1/answers/{first['id']}/thread", headers=auth(OTHER_TOKEN)).json()
+    assert [t["question"] for t in thread] == ["梳理这组文献的组织关系与差异", "两篇的样本量分别是多少"]
+    with SessionLocal() as db:
+        second = db.get(Answer, thread[1]["id"])
+        assert second.parent_id == first["id"]
+        assert second.thread_id == db.get(Answer, first["id"]).thread_id
+        assert second.options["mode"] == "qa" and second.options["use_kb"] is False
+        assert second.filters_label == "文献解读 · 2 篇 PDF"
+    assert [c[0] for c in arq.calls] == ["run_interpret_job", "run_interpret_job"]
+
+
+def test_interpret_rejects_non_pdf_and_oversized_sets(client, data_root: Path):
+    before = _docsets(data_root)
+
+    bad = _interpret(client, [_pdf(), ("files", ("b.txt", b"hello", "text/plain"))], "问题")
+    assert bad.status_code == 422
+    assert _docsets(data_root) == before, "部分落盘后失败必须清掉整个 docset"
+
+    too_many = _interpret(client, [_pdf(f"{i}.pdf") for i in range(11)], "问题")
+    assert too_many.status_code == 422
+    assert too_many.json()["code"] == "validation_error"
+    assert _docsets(data_root) == before
+
+
+def _ready_interpret(client, files=None, question="样本量多少"):
+    """建一轮已完成的解读答案：追问的前提是 thread 里有 ready 回合。"""
+    body = _interpret(client, files or [_pdf()], question).json()
+    with SessionLocal() as db:
+        row = db.get(Answer, body["id"])
+        row.status, row.answer_md = "ready", "# 结论"
+        db.get(Job, body["job_id"]).status = "succeeded"
+        db.commit()
+        return body["id"], row.thread_id
+
+
+def test_followup_on_interpret_reuses_the_docset(client, arq):
+    first, thread_id = _ready_interpret(client)
+
+    r = client.post(f"/v1/answers/{first}/followup", json={"question": "主要结局是什么"},
+                    headers=auth(OTHER_TOKEN))
+
+    assert r.status_code == 202
+    body = r.json()
+    assert body["engine"] == "interpret"
+    with SessionLocal() as db:
+        row = db.get(Answer, body["id"])
+        assert row.thread_id == thread_id and row.parent_id == first
+        assert row.options["mode"] == "qa" and row.options["use_kb"] is False
+        assert row.filters_label == "文献解读 · 1 篇 PDF"
+        assert db.get(Job, body["job_id"]).kind == "interpret"
+    assert arq.calls[-1][0] == "run_interpret_job"
+
+
+def test_deleting_the_last_interpret_turn_removes_the_docset(client, data_root: Path):
+    first, thread_id = _ready_interpret(client)
+    second = client.post(f"/v1/answers/{first}/followup", json={"question": "再说说"},
+                         headers=auth(OTHER_TOKEN)).json()["id"]
+    with SessionLocal() as db:
+        db.get(Answer, second).status = "ready"
+        db.commit()
+    docset = data_root / "docsets" / thread_id
+
+    assert client.delete(f"/v1/answers/{second}", headers=auth(OTHER_TOKEN)).status_code == 204
+    assert docset.is_dir(), "会话还有回合时不能删掉共享的 docset"
+
+    assert client.delete(f"/v1/answers/{first}", headers=auth(OTHER_TOKEN)).status_code == 204
+    assert not docset.exists()
+
+
+def test_interpret_paper_markdown_comes_from_the_docset(client, data_root: Path):
+    answer_id, thread_id = _ready_interpret(client)
+    docset = data_root / "docsets" / thread_id
+    (docset / "1.md").write_text('<a id="p1"></a>**¶1** 上传原文', encoding="utf-8")
+
+    ok = client.get(f"/v1/answers/{answer_id}/papers/1/markdown", headers=auth(OTHER_TOKEN))
+    assert ok.status_code == 200
+    assert '<a id="p1">' in ok.text
+
+    assert client.get(f"/v1/answers/{answer_id}/papers/2/markdown",
+                      headers=auth(OTHER_TOKEN)).status_code == 404
+
+
+def test_interpret_paper_detail_serves_paragraphs_and_kb_facts(client, data_root: Path):
+    answer_id, thread_id = _ready_interpret(client)
+    docset = data_root / "docsets" / thread_id
+    (docset / "1.md").write_text("# 上传文献", encoding="utf-8")
+    (docset / "1_paragraphs.json").write_text(
+        json.dumps([{"id": 1, "sec": "p.1", "page": 1, "text": "段落"}]), encoding="utf-8")
+    (docset / "kb-facts-1.json").write_text(
+        json.dumps({"version": 1, "facts": [{"fact": "f", "pid": 1, "quote": "q", "verified": True}]}),
+        encoding="utf-8")
+    with SessionLocal() as db:
+        db.get(Answer, answer_id).papers = [{"n": 1, "title": "上传文献", "source": "upload"}]
+        db.commit()
+
+    body = client.get(f"/v1/answers/{answer_id}/papers/1", headers=auth(OTHER_TOKEN)).json()
+
+    assert body["source"] == "upload"
+    assert body["fulltext_md"] == "# 上传文献"
+    assert [p["id"] for p in body["paragraphs"]] == [1]
+    assert [f["fact"] for f in body["facts"]] == ["f"]
+    assert body["notes_md"] == "" and body["citations"] == []

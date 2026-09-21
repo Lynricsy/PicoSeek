@@ -78,7 +78,7 @@ class Answer(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     job_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("jobs.id"), nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("users.id"), nullable=True)
-    # 追问链：parent_id 指向上一轮，thread_id 是整条 codex 会话的 id（ask 引擎恒为空）
+    # 追问链：parent_id 指向上一轮，thread_id 是 codex 会话 id 或 interpret 的 docset id（ask 引擎恒为空）
     parent_id: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("answers.id", ondelete="SET NULL"), nullable=True)
     thread_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

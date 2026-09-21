@@ -17,7 +17,14 @@ from app.db import SessionLocal
 from app.models import Answer, Job
 from app.services import events
 from app.services import codex as codex_engine
-from app.worker import run_ask_job, run_codex_job, run_kb_reindex_job, run_paper_ingest_job
+import interpret
+from app.worker import (
+    run_ask_job,
+    run_codex_job,
+    run_interpret_job,
+    run_kb_reindex_job,
+    run_paper_ingest_job,
+)
 
 from .conftest import make_job
 from .test_events import finish_sse, live_sse, streaming_app
@@ -372,3 +379,106 @@ async def test_terminal_xadd_failure_converges_after_stage_replay(
     finally:
         await redis.aclose()
         await worker_ctx["redis_async"].aclose()
+
+
+def _interpret_result(papers_dir: str) -> interpret.InterpretResult:
+    paper = {"n": 1, "pmid": "", "doi": "10.1/x", "pmcid": "", "title": "上传文献", "year": "",
+             "journal": "", "issn": "", "authors": "", "quartile": "", "rank": None,
+             "source": "upload", "relevance": None, "filename": "a.pdf", "md_file": "1.md",
+             "paras": [{"id": 1, "sec": "p.1", "page": 1, "text": "x"}],
+             "fulltext_md": "# 上传文献", "text": "[¶1] x", "cites": []}
+    return interpret.InterpretResult(
+        papers=[paper], used_n=[1], body_md="结论 [1¶1]",
+        answer_md="# Q\n\n结论 [1¶1](/v1/answers/x/papers/1/markdown#p1)",
+        citations=[{"n": 1, "pmid": "", "pid": 1, "sec": "p.1", "page": 1, "text": "x",
+                    "quotes": [], "from_marker": True}],
+        papers_dir=papers_dir)
+
+
+def _interpret_job(*, mode: str = "overview", use_kb: bool = True) -> tuple[str, str]:
+    job_id, answer_id = make_job(kind="interpret",
+                                 params={"question": "梳理这组文献的组织关系与差异"})
+    with SessionLocal() as db:
+        row = db.get(Answer, answer_id)
+        row.thread_id = "docset-1"
+        row.options = {"engine": "interpret", "mode": mode, "n_files": 1, "use_kb": use_kb,
+                       "question": "梳理这组文献的组织关系与差异"}
+        db.commit()
+    return job_id, answer_id
+
+
+async def test_interpret_job_persists_answer_and_queues_kb(worker_ctx, sync_redis, monkeypatch,
+                                                           tmp_path):
+    job_id, answer_id = _interpret_job()
+    seen: dict = {}
+
+    def fake_run(opts, **kw):
+        seen["opts"], seen["urls"] = opts, kw["paper_urls"]
+        return _interpret_result(str(tmp_path))
+
+    monkeypatch.setattr(interpret, "run_interpret", fake_run)
+    monkeypatch.setattr(interpret, "save_kb_snapshot", lambda res: str(tmp_path / "kb-input.json"))
+
+    await run_interpret_job(worker_ctx, job_id)
+
+    assert seen["opts"].mode == "overview"
+    assert seen["opts"].docset_dir.endswith("/docsets/docset-1")
+    assert seen["urls"] == {1: f"/v1/answers/{answer_id}/papers/1/markdown"}
+    with SessionLocal() as db:
+        job, answer = db.get(Job, job_id), db.get(Answer, answer_id)
+        assert job.status == "succeeded"
+        assert job.result["answer_id"] == answer_id
+        assert job.result["thread_id"] == "docset-1"
+        kb = db.get(Job, job.result["kb_job_id"])
+        assert kb.kind == "answer_kb" and kb.params["snapshot_path"].endswith("kb-input.json")
+        assert answer.status == "ready"
+        assert answer.n_papers == 1 and answer.n_fulltext == 1
+        assert answer.papers[0]["source"] == "upload"
+        assert answer.papers[0]["relevance"] is None
+        assert answer.body_md == "结论 [1¶1]"
+        assert answer.citations[0]["pid"] == 1
+
+    kind, data = _stream(sync_redis, job_id)[-1]
+    assert kind == "succeeded" and data == {"answer_id": answer_id}
+
+
+async def test_interpret_followup_carries_history_and_skips_kb(worker_ctx, monkeypatch, tmp_path):
+    """追问要看得到上一轮的问答，且不再重复写库。"""
+    job_id, answer_id = _interpret_job(mode="qa", use_kb=False)
+    with SessionLocal() as db:
+        db.add(Answer(id="prev", user_id="writer", status="ready", thread_id="docset-1",
+                      question="上一问", body_md="上一答", queries=[], options={}, papers=[],
+                      citations=[], kb_hits=[]))
+        db.commit()
+    seen: dict = {}
+
+    def fake_run(opts, **kw):
+        seen["history"] = opts.history
+        return _interpret_result(str(tmp_path))
+
+    monkeypatch.setattr(interpret, "run_interpret", fake_run)
+    monkeypatch.setattr(interpret, "save_kb_snapshot",
+                        lambda res: pytest.fail("追问不该再写一次知识库"))
+
+    await run_interpret_job(worker_ctx, job_id)
+
+    assert seen["history"] == (("上一问", "上一答"),)
+    with SessionLocal() as db:
+        assert "kb_job_id" not in db.get(Job, job_id).result
+
+
+async def test_interpret_job_maps_pdf_unreadable(worker_ctx, sync_redis, monkeypatch):
+    job_id, answer_id = _interpret_job()
+
+    def boom(opts, **kw):
+        raise ingest.PdfUnreadable("a.pdf: only 12 chars extracted")
+
+    monkeypatch.setattr(interpret, "run_interpret", boom)
+
+    await run_interpret_job(worker_ctx, job_id)
+
+    with SessionLocal() as db:
+        assert db.get(Answer, answer_id).error["code"] == "pdf_unreadable"
+    kind, data = _stream(sync_redis, job_id)[-1]
+    assert kind == "failed" and data["code"] == "pdf_unreadable"
+    assert "a.pdf" in data["message"]

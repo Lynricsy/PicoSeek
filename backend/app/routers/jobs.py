@@ -77,7 +77,8 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db), redis=Depends(g
 
 def _terminal_payload(job: JobRow) -> dict:
     if job.status == "succeeded":
-        if job.kind == "ask":
+        if job.kind in ("ask", "interpret"):
+            # interpret 的 result 还带 thread_id / kb_job_id，成功事件只暴露 answer_id
             return {"answer_id": (job.result or {}).get("answer_id")}
         if job.kind == "answer_kb":
             result = job.result or {}

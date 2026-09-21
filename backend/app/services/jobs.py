@@ -59,10 +59,14 @@ def active_job_count(db: Session, user_id: str | None) -> int:
     return int(db.scalar(stmt) or 0)
 
 
-def ensure_capacity(db: Session, principal) -> None:  # noqa: ANN001
-    """并发任务闸门：所有创建任务的入口共用这一处限流。"""
+def ensure_capacity(db: Session, principal, *, n: int = 1) -> None:  # noqa: ANN001
+    """并发任务闸门：所有创建任务的入口共用这一处限流。
+
+    `n` 是本次要一次性入队的任务数（文献解读的「综述 + 首问」会占两个名额）：
+    必须整批判定，否则第二个任务会在第一个占满配额后被拒，留下半条会话。
+    """
     active = active_job_count(db, principal.user_id)
-    if active >= settings.max_active_jobs_per_user:
+    if active + n > settings.max_active_jobs_per_user:
         raise ApiError(429, "too_many_jobs",
                        f"{active} active job(s) for this user; limit is {settings.max_active_jobs_per_user}")
 

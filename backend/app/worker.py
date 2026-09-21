@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 import ask
 import ingest
+import interpret
 import journal_rank as jr
 import knowledge_store as ks
 from picos_paths import RANK_DIR
@@ -30,6 +31,7 @@ from .db import SessionLocal
 from .models import JOB_TO_ANSWER_STATUS, Answer, Job, utcnow
 from .services import codex as codex_engine
 from .services import events, jobs
+from .services import interpret as interpret_service
 from .services.answer_kb import dispatch_answer_kb, process_answer_kb
 from .services.answers import describe_filters, to_answer_paper, to_ask_options, to_codex_prompt
 
@@ -46,7 +48,7 @@ def _job(db: Session, job_id: str) -> Job | None:
 
 
 def _answer_of(db: Session, job: Job) -> Answer | None:
-    if job.kind not in ("ask", "codex"):
+    if job.kind not in ("ask", "codex", "interpret"):
         return None
     answer_id = (job.params or {}).get("answer_id")
     if answer_id:
@@ -236,6 +238,84 @@ async def run_codex_job(ctx: dict, job_id: str) -> None:
     _publish(ctx, job_id, {"type": "succeeded", "answer_id": answer_id})
 
 
+async def run_interpret_job(ctx: dict, job_id: str) -> None:
+    """文献解读：一组上传 PDF 的综述或问答。
+
+    docset 目录就是 `thread_id`，解析产物在同一条会话里复用；历史回合从
+    answers 表里按时间取，不走 codex 那样的外部会话状态。
+    """
+    claimed = _claim_answer(ctx, job_id)
+    if claimed is None:
+        return
+    answer_id, options, thread_id = claimed
+    if not thread_id:
+        _terminate(ctx, job_id, "failed",
+                   {"code": "internal_error", "message": "interpret answer has no docset"})
+        return
+    emit = _emitter(ctx, job_id)
+
+    def should_cancel() -> bool:
+        return events.is_cancel_requested(ctx["redis_sync"], job_id)
+
+    with SessionLocal() as db:
+        previous = list(db.scalars(
+            select(Answer).where(Answer.thread_id == thread_id, Answer.status == "ready",
+                                 Answer.id != answer_id)
+            .order_by(Answer.created_at, Answer.id)))[-interpret.HISTORY_TURNS:]
+        history = tuple((r.question, (r.body_md or "")[:interpret.HISTORY_CHARS]) for r in previous)
+
+    n_files = int(options.get("n_files") or 0)
+    opts = interpret.InterpretOptions(docset_dir=interpret_service.docset_dir(thread_id),
+                                      question=options["question"],
+                                      mode=options.get("mode", "qa"), history=history)
+    try:
+        res = await asyncio.to_thread(
+            interpret.run_interpret, opts, emit=emit, should_cancel=should_cancel,
+            paper_urls={n: f"/v1/answers/{answer_id}/papers/{n}/markdown"
+                        for n in range(1, n_files + 1)})
+        snapshot_path = (await asyncio.to_thread(interpret.save_kb_snapshot, res)
+                         if options.get("use_kb") else None)
+    except ask.PipelineCancelled:
+        _terminate(ctx, job_id, "cancelled")
+        return
+    except ask.PipelineError as e:
+        _terminate(ctx, job_id, "failed", {"code": e.code, "message": str(e)})
+        return
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        await events.request_cancel(ctx["redis_async"], job_id, settings.events_ttl_s)
+        _terminate(ctx, job_id, "failed",
+                   {"code": "timeout", "message": f"job exceeded {settings.job_timeout_s}s"})
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("interpret job %s failed", job_id)
+        _terminate(ctx, job_id, "failed", {"code": "internal_error", "message": f"{type(e).__name__}: {e}"})
+        return
+
+    # 文献是用户给定的，没有相关性筛选：全部论文都进来源列表
+    papers = sorted((to_answer_paper(p) for p in res.papers), key=lambda p: p["n"])
+    with SessionLocal() as db:
+        job = _job(db, job_id)
+        answer = _answer_of(db, job) if job is not None else None
+        if answer is not None:
+            answer.n_papers = answer.n_fulltext = len(papers)
+            answer.papers = papers
+            answer.body_md = res.body_md
+            answer.answer_md = res.answer_md
+            answer.citations = res.citations
+            answer.kb_hits = []
+        if job is not None:
+            result = {"answer_id": answer_id, "thread_id": thread_id}
+            if snapshot_path is not None:
+                kb_job = Job(id=jobs.new_id(), kind="answer_kb", status="queued", user_id=job.user_id,
+                             params={"answer_id": answer_id, "snapshot_path": snapshot_path},
+                             progress={"stage": "kb", "current": 0, "total": len(res.papers)},
+                             result={"position": 0, "items": 0, "paper_count": len(res.papers), "attempt": 0})
+                db.add(kb_job)
+                result["kb_job_id"] = kb_job.id
+            _set_status(db, job, answer, "succeeded", result=result, finished=True)
+    _publish(ctx, job_id, {"type": "succeeded", "answer_id": answer_id})
+
+
 async def run_kb_reindex_job(ctx: dict, job_id: str) -> None:
     with SessionLocal() as db:
         job = _job(db, job_id)
@@ -392,8 +472,8 @@ def _redis_settings():
 
 
 class WorkerSettings:
-    functions = [run_ask_job, run_codex_job, run_kb_reindex_job, run_paper_ingest_job,
-                 func(run_answer_kb_job, keep_result=0, max_tries=1)]
+    functions = [run_ask_job, run_codex_job, run_interpret_job, run_kb_reindex_job,
+                 run_paper_ingest_job, func(run_answer_kb_job, keep_result=0, max_tries=1)]
     # 每月 1 日 03:00（容器时区 UTC）；arq 默认 unique=True，多 worker 只会跑一份
     cron_jobs = [cron(refresh_journal_ranks, day=1, hour=3, minute=0, timeout=900),
                  cron(dispatch_answer_kb, second=set(range(0, 60, 10)), keep_result=0)]
@@ -412,4 +492,5 @@ def run() -> None:
 
 
 __all__ = ["WorkerSettings", "refresh_journal_ranks", "run", "run_ask_job", "run_codex_job",
-           "run_kb_reindex_job", "run_paper_ingest_job", "run_answer_kb_job", "dispatch_answer_kb"]
+           "run_interpret_job", "run_kb_reindex_job", "run_paper_ingest_job", "run_answer_kb_job",
+           "dispatch_answer_kb"]

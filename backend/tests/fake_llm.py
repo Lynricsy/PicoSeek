@@ -39,6 +39,21 @@ def _cited(user: str) -> tuple[int, str]:
     return pid, _quote(text)
 
 
+PAPER_RE = re.compile(r"^PAPER \[(\d+)\] (.*)$", re.M)
+
+
+def _interpret_papers(user: str) -> list[tuple[int, str, int]]:
+    """解读提示里的每篇：(编号, 标题行, 引用的段落 pid)。pid 必须来自该篇自己的段落。"""
+    hits = list(PAPER_RE.finditer(user))
+    out: list[tuple[int, str, int]] = []
+    for i, m in enumerate(hits):
+        end = hits[i + 1].start() if i + 1 < len(hits) else len(user)
+        paras = _paragraphs(user[m.end():end])
+        pid = (paras[1] if len(paras) > 1 else paras[0])[0] if paras else 1
+        out.append((int(m.group(1)), m.group(2).split(" — file:")[0].strip(), pid))
+    return out
+
+
 def fake_llm(system: str, user: str, max_tokens: int = 2000, think: bool = False,
              temperature: float = 0.2, **_: object) -> str:
     if system.startswith("You are a medical librarian"):
@@ -79,6 +94,27 @@ def fake_llm(system: str, user: str, max_tokens: int = 2000, think: bool = False
                 "|---|---|---|---|---|---|\n"
                 "| [1] | 成人 | 干预 | 对照 | 主要结局 | 队列研究 |\n\n"
                 "**局限 / Caveats**\n- 观察性设计，存在残余混杂。\n")
+
+    if system.startswith("You are a research analyst comparing a set of uploaded papers."):
+        papers = _interpret_papers(user)
+        cols = "".join(f" [{n}] |" for n, _t, _p in papers)
+        rule = "|---" * (len(papers) + 1) + "|"
+        rows = "\n".join(f"| [{n}] | {title} | 队列研究 | 主要结局 [{n}¶{pid}] |" for n, title, pid in papers)
+        diff = "\n".join(
+            f"| {dim} |" + "".join(f" 未报告 [{n}¶{pid}] |" for n, _t, pid in papers)
+            for dim in ("人群与样本量", "干预或方法", "对照", "主要结局与结果", "结论方向", "局限"))
+        cites = " ".join(f"[{n}¶{pid}]" for n, _t, pid in papers)
+        return ("**文献概览 / Papers at a glance**\n\n"
+                "| [n] | 标题 | 研究类型 | 核心问题 |\n|---|---|---|---|\n" + rows + "\n\n"
+                f"**组织关系 / How the papers relate**\n- 这些文献围绕同一结局展开 {cites}。\n\n"
+                f"**差异对照 / Key differences**\n\n| 维度 |{cols}\n{rule}\n{diff}\n\n"
+                f"**总结 / Synthesis**\n证据方向一致，样本量差异明显 {cites}。\n")
+
+    if system.startswith("You are a research assistant answering questions strictly from the uploaded papers."):
+        papers = _interpret_papers(user)
+        cites = " ".join(f"[{n}¶{pid}]" for n, _t, pid in papers) or "[1]"
+        return (f"**结论 / Bottom line** — 依据上传的文献给出简要结论 {cites}。\n\n"
+                f"**证据 / Evidence**\n- 原文报告了相关结果 {cites}。\n")
 
     return "fake-llm: unrecognised system prompt"
 

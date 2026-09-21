@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from .common import JobError, UtcDateTime
 
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
-JobKind = Literal["ask", "codex", "kb_reindex", "paper_ingest", "answer_kb"]
+JobKind = Literal["ask", "codex", "interpret", "kb_reindex", "paper_ingest", "answer_kb"]
 TERMINAL_JOB_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
 
