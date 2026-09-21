@@ -54,7 +54,7 @@ CORS 由 `PICOSEEK_CORS_ORIGINS` 配置，默认空列表，即不添加跨域�
 
 登录按归一化后的用户名使用 Redis 固定窗口限流，含成功登录：默认 300 秒最多 10 次，超出返回 `429 login_rate_limited` 及剩余秒数 `Retry-After`；窗口不因重试延长。配置为 `PICOSEEK_LOGIN_MAX_ATTEMPTS`、`PICOSEEK_LOGIN_WINDOW_S`。Redis 不可用时登录返回 `503 unavailable`，不绕过限流；已有会话仍由数据库验证。
 
-业务接口没有通用请求速率限制。每个用户的 `queued` 与 `running` job 合计达到 `PICOSEEK_MAX_ACTIVE_JOBS_PER_USER`（默认 `2`）后，`POST /v1/answers`、`POST /v1/papers/upload` 与 `POST /v1/papers/ingest` 返回 `429 too_many_jobs`；同一用户的多个会话共享额度。
+业务接口没有通用请求速率限制。每个用户的 `queued` 与 `running` job 合计达到 `PICOSEEK_MAX_ACTIVE_JOBS_PER_USER`（默认 `2`）后，`POST /v1/answers`、`POST /v1/answers/interpret`、`POST /v1/papers/upload` 与 `POST /v1/papers/ingest` 返回 `429 too_many_jobs`；同一用户的多个会话共享额度。多篇带问题的文献解读一次入队两轮，整批判定，占两个名额。
 
 ## 2. 错误模型
 
@@ -136,6 +136,7 @@ CORS 由 `PICOSEEK_CORS_ORIGINS` 配置，默认空列表，即不添加跨域�
 | `GET` / `PATCH` | `/v1/users/{user_id}` | `admin` | 读取账号或切换启用状态。 |
 | `POST` | `/v1/users/{user_id}/password` | `admin` | 重置密码并撤销全部会话。 |
 | `POST` | `/v1/answers` | 登录 | 创建异步问答任务。 |
+| `POST` | `/v1/answers/interpret` | 登录 | 上传 1..N 篇 PDF 创建文献解读会话（multipart）。 |
 | `GET` | `/v1/answers` | 登录 | 分页浏览 answer。 |
 | `GET` | `/v1/answers/{answer_id}` | 登录 | 获取 answer 详情。 |
 | `DELETE` | `/v1/answers/{answer_id}` | 本人或 `admin` | 仅删除终态结果；活跃时返回 `409`。 |
@@ -143,6 +144,8 @@ CORS 由 `PICOSEEK_CORS_ORIGINS` 配置，默认空列表，即不添加跨域�
 | `GET` | `/v1/answers/{answer_id}/pdf` | 登录 | 导出排版后的 PDF；服务端统一渲染，三端一致。 |
 | `GET` | `/v1/answers/{answer_id}/papers/{n}` | 登录 | 获取本次问答阅读的第 `n` 篇详情。 |
 | `GET` | `/v1/answers/{answer_id}/papers/{n}/markdown` | 登录 | 获取本次阅读原文快照，保留段落锚点。 |
+| `POST` | `/v1/answers/{answer_id}/followup` | 本人 | 在智能体或文献解读会话上追问。 |
+| `GET` | `/v1/answers/{answer_id}/thread` | 登录 | 获取同一会话的全部回合。 |
 | `GET` | `/v1/jobs` | 登录 | 本人任务；`admin` 查看全部。 |
 | `GET` | `/v1/jobs/{job_id}` | 登录 | 获取可见 job 详情。 |
 | `POST` | `/v1/jobs/{job_id}/cancel` | 本人或 `admin` | 请求取消活跃 job，接受后返回 `202`。 |
@@ -201,7 +204,7 @@ CORS 由 `PICOSEEK_CORS_ORIGINS` 配置，默认空列表，即不添加跨域�
 | 字段 | 类型 | 必填 | 默认 | 规则 |
 |---|---|---:|---|---|
 | `question` | `string` | 是 | — | 去除首尾空白后长度 `1..2000`。 |
-| `engine` | `ask \| codex` | 否 | `ask` | `ask` 走确定性流水线；`codex` 交给容器内的 Codex agent（见下）。 |
+| `engine` | `ask \| codex` | 否 | `ask` | `ask` 走确定性流水线；`codex` 交给容器内的 Codex agent（见下）。`interpret` 不接受 JSON 创建，只能走 `POST /v1/answers/interpret`。 |
 | `papers` | `integer` | 否 | `8` | `1..30`。 |
 | `years` | `integer \| null` | 否 | `null` | 最近年数，`1..50`；不能与 `year_from` 同时给。 |
 | `year_from` | `integer \| null` | 否 | `null` | `1900..2100`。 |
@@ -226,6 +229,32 @@ answer 与关联 job 在同一数据库事务中提交后才入队。Redis 入�
 - 事件流只有 `agent` 一个 `stage`，工具调用以 `tool` 事件（`ToolCall`）呈现，同一 `call_id` 先后发 `started` 与终态两条；
 - 成功后 `job.result` 额外带 `thread_id`，`Answer.trace` 保存本轮全部终态工具调用，`Answer.thread_id` 可用于服务端复盘会话与追问；
 - `filters_label` 与 `ask` 同源（如 `年份 2023-2026; 分区 Q1/Q2`，无筛选时为 `无`）。
+
+#### `POST /v1/answers/interpret`
+
+`multipart/form-data`，用上传的 PDF 建立一条**文献解读**会话：
+
+| 字段 | 类型 | 必填 | 规则 |
+|---|---|---:|---|
+| `files` | 文件（可重复） | 是 | 同名重复字段给出多篇；数量 `1..PICOSEEK_INTERPRET_MAX_FILES`（默认 `10`）。每个必须以 `%PDF-` 开头（否则 `422`），且不超过 `PICOSEEK_UPLOAD_MAX_MB`（否则 `413 payload_too_large`）。 |
+| `question` | `string` | 视篇数 | 长度 `0..2000`。只传 1 篇时必填（没有可对照的对象）；多篇时可留空，只出综述。 |
+
+一组文件叫一个 **docset**，落在 `PICOSEEK_DATA/docsets/<thread_id>/`，其 id 即该会话的 `thread_id`。任一文件校验失败时整个 docset 目录被清除，不留半份上传。
+
+入队规则：
+
+- 多篇（`>= 2`）：第一轮固定是综述，`options.mode = "overview"`、`question` 为 `梳理这组文献的组织关系与差异`、`use_kb = true`；若同时给了 `question`，再入队第二轮（`mode = "qa"`、`use_kb = false`、`parent_id` 指向第一轮、同一 `thread_id`）。worker 串行且 arq 为 FIFO，第二轮能读到第一轮的问答历史。
+- 单篇：只入队一轮，`mode = "qa"`、`use_kb = true`。
+
+成功返回 `202 Accepted`、`Location: /v1/answers/{answer_id}`，响应体是**第一轮**的 `Answer`（多篇时用 `GET /v1/answers/{id}/thread` 取到第二轮）。`filters_label` 形如 `文献解读 · 2 篇 PDF`。可能错误：`validation_error`、`payload_too_large`、`too_many_jobs`、`upstream_unavailable`、`internal_error`。
+
+任务 `kind` 为 `interpret`，与 `ask` 的差异：
+
+- 只有两个 `stage`：`fulltext`（逐篇解析 PDF，带 `progress` 计数）与 `synthesize`（一次模型调用），没有 `queries` / `search` / `read`；
+- 有结构化 `papers` 与 `citations`，`papers[].source` 恒为 `upload`、`relevance` 恒为 `null`，`/papers/{n}` 与 `/papers/{n}/markdown` 从 docset 目录读取（`notes_md` 为空、`citations` 为空数组，`facts` 在后台入库完成后才非空）；
+- `body_md` 在综述回合是「文献概览 / 组织关系 / 差异对照 / 总结」四段，在问答回合是「结论 / 证据 /（可选）局限」；
+- 成功后 `job.result` 额外带 `thread_id`；首轮 `use_kb = true` 还会带 `kb_job_id`，上传件经既有 `answer_kb` 后台任务进共享文献库与知识库；
+- 解析产物（`<n>.md`、`<n>_paragraphs.json`）在 docset 里复用，追问不重复解析，也不重复入库。
 
 #### `GET /v1/answers`
 
@@ -270,6 +299,7 @@ answer 与关联 job 在同一数据库事务中提交后才入队。Redis 入�
 
 - answer 为活跃状态：返回 `409 conflict`，既不删除，也不请求取消。需要取消时，使用 `Answer.job_id` 调用独立取消端点。
 - answer 为终态：删除数据库记录、`answers/{id}.md` 与 `answers/{id}_papers/`。删除成功后的重复请求返回 `404 not_found`。
+- 文献解读：删掉会话的**最后一行**时，整个 `docsets/{thread_id}/` 目录（上传的 PDF 与解析产物）一并清除；还有其他回合时保留。
 - 本地文献库 `library/` 与 KB 不随 answer 删除。
 - 删除只影响这一行：会话不级联删除，指向它的追问行 `parent_id` 置为 `null`，`thread_id` 保持不变。
 
@@ -279,13 +309,13 @@ answer 与关联 job 在同一数据库事务中提交后才入队。Redis 入�
 
 请求体为 `FollowupCreate`：`{"question": string}`，规则同 `AnswerCreate.question`（去除首尾空白后长度 `1..2000`）。
 
-在被追问答案所属的 codex 会话上再跑一轮：其余选项一律沿用被续接的那一轮，只换问题。父行取会话内**最后一个** `ready` 回合，而不是路径里的那一行——失败或取消的回合不阻塞后续追问。新行带 `parent_id` 与同一 `thread_id`，任务 `kind` 为 `codex`。
+在被追问答案所属的会话上再跑一轮：其余选项一律沿用被续接的那一轮，只换问题。父行取会话内**最后一个** `ready` 回合，而不是路径里的那一行——失败或取消的回合不阻塞后续追问。新行带 `parent_id` 与同一 `thread_id`，任务 `kind` 与被续接的引擎一致（`codex` 或 `interpret`）。文献解读的追问强制 `mode = "qa"`、`use_kb = false`：同一 docset 只入库一次。
 
 成功返回 `202 Accepted`、响应头 `Location: /v1/answers/{new_answer_id}`，响应体为新一轮的 `Answer`。
 
 - 答案不可见：`404 not_found`；
 - 非发起人（含管理员对他人答案）：`403 forbidden`——会话归属发起人，续下去会污染对方历史；
-- 答案不是 codex 引擎产出：`409 conflict`；
+- 答案不是智能体或文献解读引擎产出：`409 conflict`；
 - 会话内仍有 `queued` 或 `running` 的回合：`409 thread_busy`；
 - 会话内没有可续接的 `ready` 回合：`409 not_ready`。
 
@@ -301,7 +331,7 @@ answer 与关联 job 在同一数据库事务中提交后才入队。Redis 入�
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `kind` | `ask \| codex \| kb_reindex \| paper_ingest \| answer_kb \| null` | `null` | 精确过滤任务种类。 |
+| `kind` | `ask \| codex \| interpret \| kb_reindex \| paper_ingest \| answer_kb \| null` | `null` | 精确过滤任务种类。 |
 | `status` | `queued \| running \| succeeded \| failed \| cancelled \| null` | `null` | 精确过滤状态。 |
 | `limit` | `integer` | `20` | `1..100`。 |
 | `offset` | `integer` | `0` | `>=0`。 |
@@ -516,7 +546,7 @@ DOI 中的斜杠属于参数值，例如 `/v1/literature/resolve?ident=10.1000/f
 | `job_id` | `string \| null` | 关联的异步 job ID。 |
 | `status` | `queued \| running \| ready \| failed \| cancelled` | answer 生命周期状态。 |
 | `question` | `string` | 原始问题。 |
-| `engine` | `ask \| codex` | 产出该答案的引擎；历史导入数据为 `ask`。 |
+| `engine` | `ask \| codex \| interpret` | 产出该答案的引擎；历史导入数据为 `ask`。 |
 | `filters_label` | `string \| null` | 已归一化的筛选条件展示文本。 |
 | `n_papers` | `integer \| null` | 纳入答案的文献数。 |
 | `n_fulltext` | `integer \| null` | 纳入文献中读取全文的数量。 |
@@ -584,7 +614,7 @@ DOI 中的斜杠属于参数值，例如 `/v1/literature/resolve?ident=10.1000/f
 | `title` / `year` / `journal` / `issn` / `authors` | `string` | 论文元数据；未知时为空字符串。 |
 | `quartile` | `string` | 分区值；未知时为空字符串。 |
 | `rank_label` | `string` | 已格式化、可直接展示的分区标签。 |
-| `source` | `pmc \| pdf \| inst \| abstract` | 流水线实际读取的内容来源，默认 `abstract`。 |
+| `source` | `pmc \| pdf \| inst \| upload \| abstract` | 流水线实际读取的内容来源，默认 `abstract`；`upload` 是文献解读里用户上传的 PDF。 |
 | `relevance` | `integer \| null` | 模型判定的相关性。 |
 | `n_paragraphs` | `integer` | 段落数。 |
 | `n_citations` | `integer` | 抽取引文数。 |
@@ -622,7 +652,7 @@ DOI 中的斜杠属于参数值，例如 `/v1/literature/resolve?ident=10.1000/f
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `id` | `string` | job ID。 |
-| `kind` | `ask \| codex \| kb_reindex \| paper_ingest \| answer_kb` | 任务种类。 |
+| `kind` | `ask \| codex \| interpret \| kb_reindex \| paper_ingest \| answer_kb` | 任务种类。 |
 | `status` | `queued \| running \| succeeded \| failed \| cancelled` | job 生命周期状态。 |
 | `user_id` | `string \| null` | 所有者的用户 ID；历史迁移或 CLI 导入的无归属数据为 `null`，仅管理员可见。 |
 | `params` | `object` | 入队参数。 |

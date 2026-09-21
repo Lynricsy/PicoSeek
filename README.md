@@ -103,7 +103,7 @@ flowchart LR
     API[api<br/>FastAPI]
     Redis[(redis<br/>任务队列与事件流)]
     Worker[worker<br/>arq]
-    Data[(共享数据卷<br/>answers / library / kb / data / models / pdfs / var)]
+    Data[(共享数据卷<br/>answers / library / kb / docsets / data / models / pdfs / var)]
     LLM[SSH 隧道<br/>远端 vLLM / Qwen3.8-27B]
     Sources[PubMed / Europe PMC<br/>Semantic Scholar]
 
@@ -124,21 +124,34 @@ flowchart LR
 
 后台由数据库持久任务驱动，worker 启动和每 10 秒扫描恢复，Redis 投递失败不会丢掉任务。每次只处理一篇；有其他种类任务排队或运行时，不派发下一篇。已开始的一篇不会被抢占，所以新问答最多仍需等待当前篇完成，而不是等待整批入库。事实抽取完成后原子保存检查点，重试可复用；每篇最多尝试 3 次，逐篇保存恢复游标。取消后台任务不回滚此前已写入的文献。多个 worker 必须共享 `answers/`、`library/`、`kb/` 与 `var/`，且共享文件系统须支持 POSIX 文件锁及原子重命名；`var/answer-kb.lock` 保证跨进程后台串行，运行期间不要删除锁文件。本机 CLI 不走后台队列，仍同步抽取与索引。
 
-### 两个问答引擎
+### 三个问答引擎
 
-`POST /v1/answers` 的 `engine` 决定 worker 走哪条路：
+`POST /v1/answers` 的 `engine` 决定 worker 走哪条路；第三个引擎 `interpret` 不接受 JSON 创建，只能通过 `POST /v1/answers/interpret`（multipart）上传 PDF 建立：
 
-| | `ask`（默认） | `codex` |
-|---|---|---|
-| 执行方式 | 固定流水线：检索 → 取全文 → 逐篇阅读 → 综合 | Codex agent 自己决定调哪些工具 |
-| 工具面 | 流水线内部直接调 `core/literature.py` 等 | core 的 `semantic_scholar` MCP（与 `./PicoSeek codex` 同一套） |
-| 产出 | `body_md` 分节 + 逐篇原文快照 + 段落级引用 | 整篇 `answer_md` + `trace`（结构化工具调用轨迹），无原文快照 |
-| 生效筛选 | 全部字段，服务端硬过滤 | 年份/分区/期刊等翻成检索要求交给模型 |
-| 多轮 | 每次提问独立 | 同一 codex 会话可 `POST /v1/answers/{id}/followup` 续接追问 |
+| | `ask`（默认） | `codex` | `interpret` |
+|---|---|---|---|
+| 执行方式 | 固定流水线：检索 → 取全文 → 逐篇阅读 → 综合 | Codex agent 自己决定调哪些工具 | 解析上传的 PDF → 一次模型调用产出综述或回答 |
+| 文献来源 | 检索 PubMed / Europe PMC 等上游 | agent 自主检索 | 用户上传的 1..10 篇 PDF（`PICOSEEK_INTERPRET_MAX_FILES`） |
+| 工具面 | 流水线内部直接调 `core/literature.py` 等 | core 的 `semantic_scholar` MCP（与 `./PicoSeek codex` 同一套） | 无外部工具，只读上传件 |
+| 产出 | `body_md` 分节 + 逐篇原文快照 + 段落级引用 | 整篇 `answer_md` + `trace`（结构化工具调用轨迹），无原文快照 | 同 `ask`：`body_md` 分节 + 逐篇原文快照 + 段落级引用 |
+| 生效筛选 | 全部字段，服务端硬过滤 | 年份/分区/期刊等翻成检索要求交给模型 | 不适用 |
+| 多轮 | 每次提问独立 | 同一 codex 会话可 `POST /v1/answers/{id}/followup` 续接追问 | 同一 docset 可 `followup` 续接追问，解析产物复用 |
+
+#### Codex 运行时
 
 codex 运行时随 `openai-codex` 依赖一起进镜像（`openai-codex-cli-bin` 带 codex 二进制，不需要 node，也不读 `~/.codex/config.toml`）：provider 与 MCP 全部走每次会话的内联配置，复用 `LLM_BASE` / `LLM_MODEL` / `LOCAL_QWEN_KEY`，因此必须是支持 **Responses API**（`/v1/responses`）的端点——codex 0.147 起不再支持 chat 线协议。当前远端 vLLM 同时提供 Chat Completions 和 Responses API，无需 LiteLLM 中转。会话文件落在 `CODEX_HOME`（镜像内为 `/data/var/codex`，随 `./var` 卷持久化）。
 
 服务端运行以 `sandbox=read-only` + `approval_mode=deny_all` 启动，工作目录是 `CODEX_HOME/work` 空目录而非代码树。注意这两项只挡住写入与升权批准：**read-only 不限制读取范围**，`cwd` 也只是工作目录，真正的租户隔离靠容器与运行用户，多租户对外开放前必须在容器/进程层面隔离。
+
+#### 文献解读（`interpret`）
+
+一次上传的一组 PDF 叫一个 **docset**，它的 id 就是这条会话的 `thread_id`，文件落在 `PICOSEEK_DATA/docsets/<thread_id>/`：`<n>.pdf` 是原件，`<n>.md`（带段落锚点）与 `<n>_paragraphs.json` 是 worker 第一次解析后落下的产物，追问直接复用、不再重复解析。`manifest.json` 记录编号、文件名与解析出的标题 / DOI / 段落数。删除会话最后一轮时整个 docset 目录一并清除；已写入 `library/` 与 kb 的副本不受影响。
+
+上传 2..10 篇且带问题时，API 一次入队两轮：第一轮固定是综述（问题为「梳理这组文献的组织关系与差异」，输出「文献概览 / 组织关系 / 差异对照 / 总结」四个模块），第二轮才是用户的问题。因为占两个名额，`PICOSEEK_MAX_ACTIVE_JOBS_PER_USER` 必须 ≥ 2（默认即为 2）。只传 1 篇时没有可对照的对象，必须给出问题，直接进问答模式。
+
+首轮 `use_kb=true`，上传的 PDF 会经既有 `answer_kb` 后台任务进共享文献库与知识库（`source=upload`）；追问只读不写。送入模型的正文按 `min(60000, 360000 // 篇数)` 字符逐篇截断，段落列表与原文快照始终保留完整。SSE 阶段只有 `fulltext`（解析 PDF）与 `synthesize`（生成），不引入新的阶段字面量。
+
+原生端（Apple / Flutter）只做最小兼容：能渲染解读答案、显示「解读」徽标与两节点进度轨道、在会话上继续提问；创建入口只在 Web。
 
 ### 导出 PDF
 
@@ -363,7 +376,8 @@ uv run --directory backend picoseek reset-password admin
 | `PICOSEEK_MAX_ACTIVE_JOBS_PER_USER` | `2` | 每个用户允许的 queued/running 任务上限，多个会话共享，必须大于 0 |
 | `PICOSEEK_EVENTS_TTL_S` | `604800` | Redis 任务事件流与取消标记的保留秒数，默认 7 天 |
 | `PICOSEEK_EVENTS_MAXLEN` | `2000` | 每个任务 Redis Stream 的近似最大事件数 |
-| `PICOSEEK_UPLOAD_MAX_MB` | `50` | `POST /v1/papers/upload` 单个 PDF 的大小上限（MB），必须大于 0 |
+| `PICOSEEK_UPLOAD_MAX_MB` | `50` | 单个上传 PDF 的大小上限（MB），`/v1/papers/upload` 与 `/v1/answers/interpret` 共用，必须大于 0 |
+| `PICOSEEK_INTERPRET_MAX_FILES` | `10` | 一次文献解读最多上传几篇 PDF，必须大于 0 |
 
 Compose 固定容器内的 Redis 为 `redis://redis:6379/0`、数据库为 `sqlite:////data/var/api.sqlite3`；`.env` 中的 `PICOSEEK_PORT` 控制宿主机端口映射。
 

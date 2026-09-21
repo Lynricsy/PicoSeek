@@ -112,6 +112,7 @@ PicoSeek/
 │   └── litellm.sh             LiteLLM 代理（:4000）
 ├── ask.py                   一键流水线主程序（筛选 / 段落定位 / 知识抽取）
 ├── ingest.py                单篇入库（上传 PDF 或按 DOI 经机构访问下载 → 分段 → 抽事实 → library + kb）
+├── interpret.py             文献解读（一组上传 PDF → 解析 → 综述 / 问答；HTTP 专用，无 CLI 入口）
 ├── journal_rank.py          期刊分区表加载与查询（SCImago / 自定义中科院分区 CSV）
 ├── knowledge_store.py       段落切分、引文核实、原子知识抽取、向量知识库
 ├── semantic_scholar_mcp.py  Codex 用的 MCP 工具服务（检索 / 全文 / 本地 PDF / kb_search）
