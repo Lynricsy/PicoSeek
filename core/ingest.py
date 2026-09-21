@@ -54,6 +54,23 @@ class FulltextUnavailable(PipelineError):
     code = "fulltext_unavailable"
 
 
+def parse_pdf(pdf_path: str, max_chars: int) -> tuple[str, list[dict]]:
+    """pypdf 取文本并分段；扫描件 / 加密 / 无段落一律抛 PdfUnreadable。
+
+    `run_ingest` 与 `interpret.ensure_parsed` 共用同一套可读性判定，
+    两条入口对同一份坏 PDF 必须给出同一个失败码。
+    """
+    text = lit.pdf_text(pdf_path, max_chars * 2)
+    if text.startswith("ERROR"):
+        raise PdfUnreadable(text)
+    if len(text) <= 2000:      # 阈值与 ask.fetch_fulltext 的机构访问分支一致：更短的多半是扫描件
+        raise PdfUnreadable(f"only {len(text)} chars extracted")
+    paras = ks.paragraphs_from_pdf_text(text)
+    if not paras:
+        raise PdfUnreadable("no paragraphs")
+    return text, paras
+
+
 def run_ingest(src: IngestSource, *, emit: Emit = print_emit,
                should_cancel: Callable[[], bool] = lambda: False,
                max_chars: int = 28000) -> IngestResult:
@@ -81,14 +98,7 @@ def run_ingest(src: IngestSource, *, emit: Emit = print_emit,
             raise FulltextUnavailable(note)
 
     _check()
-    text = lit.pdf_text(src.pdf_path, max_chars * 2)
-    if text.startswith("ERROR"):
-        raise PdfUnreadable(text)
-    if len(text) <= 2000:      # 阈值与 ask.fetch_fulltext 的机构访问分支一致：更短的多半是扫描件
-        raise PdfUnreadable(f"only {len(text)} chars extracted")
-    paras = ks.paragraphs_from_pdf_text(text)
-    if not paras:
-        raise PdfUnreadable("no paragraphs")
+    _text, paras = parse_pdf(src.pdf_path, max_chars)
     _stage("fulltext", "finished", n_paragraphs=len(paras))
 
     _check()

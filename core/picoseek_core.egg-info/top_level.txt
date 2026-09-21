@@ -1,5 +1,6 @@
 ask
 ingest
+interpret
 journal_rank
 knowledge_store
 literature

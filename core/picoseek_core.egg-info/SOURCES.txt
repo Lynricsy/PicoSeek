@@ -1,6 +1,7 @@
 README.md
 ask.py
 ingest.py
+interpret.py
 journal_rank.py
 knowledge_store.py
 literature.py
@@ -16,6 +17,7 @@ picoseek_core.egg-info/dependency_links.txt
 picoseek_core.egg-info/requires.txt
 picoseek_core.egg-info/top_level.txt
 tests/test_ingest.py
+tests/test_interpret.py
 tests/test_journal_rank.py
 tests/test_literature.py
 tests/test_pipeline.py

@@ -691,13 +691,18 @@ def _atomic_json(path: str, value: object) -> None:
             os.unlink(temporary)
 
 
-def save_kb_snapshot(res: AskResult) -> str:
-    """保存所有候选论文的独立入库输入，不依赖答案行或可变 library 文件。"""
-    papers = [{**{k: p.get(k) for k in _KB_META_FIELDS}, "n": p["n"],
-               "paras": p["paras"], "fulltext_md": p["fulltext_md"]} for p in res.papers]
-    path = os.path.join(res.papers_dir, "kb-input.json")
-    _atomic_json(path, {"version": 1, "question_en": res.question_en, "papers": papers})
+def write_kb_snapshot(papers_dir: str, question_en: str, papers: list[dict]) -> str:
+    """保存入库输入快照（ask 与 interpret 共用）；不依赖答案行或可变 library 文件。"""
+    rows = [{**{k: p.get(k) for k in _KB_META_FIELDS}, "n": p["n"],
+             "paras": p["paras"], "fulltext_md": p["fulltext_md"]} for p in papers]
+    path = os.path.join(papers_dir, "kb-input.json")
+    _atomic_json(path, {"version": 1, "question_en": question_en, "papers": rows})
     return path
+
+
+def save_kb_snapshot(res: AskResult) -> str:
+    """保存所有候选论文的独立入库输入。"""
+    return write_kb_snapshot(res.papers_dir, res.question_en, res.papers)
 
 
 def _valid_facts(facts: object) -> bool:

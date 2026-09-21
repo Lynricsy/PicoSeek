@@ -8,3 +8,6 @@ models/
 
 # 运行期数据（PICOSEEK_DATA 默认落在 core/）
 var/
+
+# 文献解读上传的 PDF 与解析产物
+docsets/

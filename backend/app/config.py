@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     events_ttl_s: int = 604800                  # Redis 事件流保留 7 天
     events_maxlen: int = 2000
     upload_max_mb: int = Field(50, gt=0)        # 单次上传 PDF 的上限
+    interpret_max_files: int = Field(10, gt=0)  # 一次文献解读最多上传几篇 PDF
 
     @field_validator("cors_origins", mode="before")
     @classmethod

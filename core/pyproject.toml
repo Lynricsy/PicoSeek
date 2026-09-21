@@ -29,6 +29,7 @@ py-modules = [
   "spider_auth",
   "verify_citations",
   "ingest",
+  "interpret",
 ]
 
 [tool.uv.sources]
