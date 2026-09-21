@@ -30,6 +30,20 @@ void main() {
     expect(nodes.any((n) => n.key == 'kb'), isFalse);
   });
 
+  test('文献解读只有解析与成稿两节点，写库仍挂在末尾', () {
+    final nodes = askRailNodes(
+      JobLive.empty,
+      useKb: true,
+      steps: StageKey.interpretPipeline,
+    );
+    expect(nodes.map((n) => n.key).toList(), [
+      'fulltext',
+      'synthesize',
+      'kb',
+    ]);
+    expect(nodes.first.label, '获取全文');
+  });
+
   test('流水线进行中：跑过的阶段是运行中，完成的阶段带详情摘要', () {
     final live = JobLive.empty
         .applying(

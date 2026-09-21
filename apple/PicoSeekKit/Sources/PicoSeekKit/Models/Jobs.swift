@@ -3,6 +3,7 @@ import Foundation
 public enum JobKind: String, Codable, Sendable, Hashable {
     case ask
     case codex
+    case interpret
     case kbReindex = "kb_reindex"
     case paperIngest = "paper_ingest"
     case answerKb = "answer_kb"

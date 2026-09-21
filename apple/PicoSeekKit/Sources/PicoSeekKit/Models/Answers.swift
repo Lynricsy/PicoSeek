@@ -11,10 +11,12 @@ public enum AnswerStatus: String, Codable, Sendable, Hashable, CaseIterable {
     public var isActive: Bool { self == .queued || self == .running }
 }
 
-/// 问答引擎：`ask` 走固定证据流水线，`codex` 交给智能体自主决定检索路径。
+/// 问答引擎：`ask` 走固定证据流水线，`codex` 交给智能体自主决定检索路径，
+/// `interpret` 解读上传的 PDF（只能由上传入口创建，提问框里选不到）。
 public enum AnswerEngine: String, Codable, Sendable, Hashable, CaseIterable {
     case ask
     case codex
+    case interpret
 
     /// 后端未来新增引擎时不至于整份答案解码失败。
     public init(from decoder: any Decoder) throws {

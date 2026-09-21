@@ -21,9 +21,14 @@ enum AnswerStatus {
 
 enum AnswerEngine {
   ask,
-  codex;
+  codex,
+  interpret;
 
   bool get isCodex => this == AnswerEngine.codex;
+
+  /// 智能体与文献解读都是多轮会话，答案就绪后输入框转为追问态。
+  bool get supportsFollowUp =>
+      this == AnswerEngine.codex || this == AnswerEngine.interpret;
 }
 
 /// 后端新增引擎时老客户端按「标准」渲染，而不是整份答案解不出来。

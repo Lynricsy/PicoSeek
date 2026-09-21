@@ -250,9 +250,9 @@ class _AnswerPageState extends ConsumerState<AnswerPage> {
         onDelete: _delete,
         onExportPdf: _exportPdf,
         onReuse: () => _reuseFilters(answer),
-        // 智能体的已完成回合才能续接，其余情况一律新建一轮。
+        // 智能体与文献解读的已完成回合才能续接，其余情况一律新建一轮。
         onSubmit:
-            (answer.engine == AnswerEngine.codex &&
+            (answer.engine.supportsFollowUp &&
                 answer.status == AnswerStatus.ready)
             ? _submitFollowUp
             : _submitNew,
@@ -342,14 +342,16 @@ class _AnswerContent extends ConsumerWidget {
         .watch(answerControllerProvider(answer.id).notifier)
         .cancelRequested;
     final codex = answer.engine == AnswerEngine.codex;
-    // 只有智能体会话才有多轮，标准引擎不必为此多发一个请求。
-    final thread = codex
+    final interpret = answer.engine == AnswerEngine.interpret;
+    // 只有多轮会话才有线程，标准引擎不必为此多发一个请求。
+    final thread = answer.engine.supportsFollowUp
         ? (ref.watch(answerThreadProvider(answer.id)).value ??
               const <AnswerSummary>[])
         : const <AnswerSummary>[];
 
-    final followUp = codex && answer.status == AnswerStatus.ready;
-    // 写库只对标准引擎生效，且答案交付后才排后台任务。
+    final followUp =
+        answer.engine.supportsFollowUp && answer.status == AnswerStatus.ready;
+    // 写库对智能体不生效；其余引擎都是答案交付后才排后台任务。
     final useKb = !codex && answer.options['use_kb'] != false;
 
     return FloatingComposerHost(
@@ -376,6 +378,10 @@ class _AnswerContent extends ConsumerWidget {
                         child: ProgressPipeline(
                           state: liveState,
                           engine: answer.engine,
+                          steps: interpret
+                              ? StageKey.interpretPipeline
+                              : StageKey.askPipeline,
+                          title: interpret ? '文献解读' : null,
                           useKb: useKb,
                           onCandidateTap: (pmid) =>
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -425,7 +431,11 @@ class _AnswerContent extends ConsumerWidget {
                         alignment: Alignment.centerLeft,
                         child: OutlinedButton(
                           onPressed: onReuse,
-                          child: Text(codex ? '重新提问' : '放宽筛选后重新提问'),
+                          child: Text(
+                            answer.engine == AnswerEngine.ask
+                                ? '放宽筛选后重新提问'
+                                : '重新提问',
+                          ),
                         ),
                       ),
                     ],
@@ -443,7 +453,13 @@ class _AnswerContent extends ConsumerWidget {
                   ),
                 ),
               if (answer.status == AnswerStatus.ready) ...[
-                if (useKb && jobId != null) _BackgroundKbRail(jobId: jobId),
+                if (useKb && jobId != null)
+                  _BackgroundKbRail(
+                    jobId: jobId,
+                    steps: interpret
+                        ? StageKey.interpretPipeline
+                        : StageKey.askPipeline,
+                  ),
                 _ReadyBody(answer: answer, onOpenReader: onOpenReader),
               ],
             ],
@@ -454,8 +470,9 @@ class _AnswerContent extends ConsumerWidget {
         controller: composer,
         onSubmit: onSubmit,
         submitting: submitting,
-        // 智能体的已完成回合可以续接，输入框锁定引擎并换占位文案。
+        // 智能体与文献解读的已完成回合可以续接，输入框锁定引擎并换占位文案。
         mode: followUp ? ComposerMode.followUp : ComposerMode.ask,
+        sessionEngine: answer.engine,
         hintText: followUp ? null : '继续提问…',
         onFilterTap: followUp ? null : () => showFilterSheet(context),
       ),
@@ -506,9 +523,12 @@ class _ReadyBody extends ConsumerWidget {
 /// 答案页的阶段节点条：答案已出，前序阶段一律算完成，末尾挂后台写库的实时状态。
 /// 重进页面时 SSE 状态是空的，所以走 `settled: true` 而不是等事件重放。
 class _BackgroundKbRail extends ConsumerWidget {
-  const _BackgroundKbRail({required this.jobId});
+  const _BackgroundKbRail({required this.jobId, required this.steps});
 
   final String jobId;
+
+  /// 前序阶段序列：文献解读只有解析与成稿两节点。
+  final List<StageKey> steps;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -524,6 +544,7 @@ class _BackgroundKbRail extends ConsumerWidget {
             useKb: true,
             kb: kb,
             settled: true,
+            steps: steps,
           ),
           progress: kb.status == KbStatus.running && kb.total > 0
               ? (
@@ -665,7 +686,8 @@ class _AnswerHeader extends StatelessWidget {
                     Text('·', style: caption),
                     Text('${answer.nPapers} 篇文献', style: caption),
                   ],
-                  if (answer.engine.isCodex) EngineBadge(engine: answer.engine),
+                  if (answer.engine != AnswerEngine.ask)
+                    EngineBadge(engine: answer.engine),
                 ],
               ),
             ),
@@ -727,7 +749,7 @@ class _AnswerMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final codex = answer.engine.isCodex;
+    final standard = answer.engine == AnswerEngine.ask;
     return PopupMenuButton<_AnswerAction>(
       tooltip: '更多',
       icon: const Icon(Icons.more_horiz),
@@ -744,8 +766,8 @@ class _AnswerMenu extends StatelessWidget {
       itemBuilder: (context) => [
         PopupMenuItem(
           value: _AnswerAction.reuse,
-          // 智能体没有「筛选」这层语义，只是重新问一次。
-          child: Text(codex ? '重新提问' : '沿用筛选重新提问'),
+          // 只有标准引擎有「筛选」这层语义，其余引擎只是重新问一次。
+          child: Text(standard ? '沿用筛选重新提问' : '重新提问'),
         ),
         PopupMenuItem(
           value: _AnswerAction.queries,

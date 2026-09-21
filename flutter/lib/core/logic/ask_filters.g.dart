@@ -50,6 +50,7 @@ Map<String, dynamic> _$AskFiltersToJson(_AskFilters instance) =>
 const _$AnswerEngineEnumMap = {
   AnswerEngine.ask: 'ask',
   AnswerEngine.codex: 'codex',
+  AnswerEngine.interpret: 'interpret',
 };
 
 const _$YearModeEnumMap = {

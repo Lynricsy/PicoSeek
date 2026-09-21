@@ -148,6 +148,7 @@ const _$AnswerStatusEnumMap = {
 const _$AnswerEngineEnumMap = {
   AnswerEngine.ask: 'ask',
   AnswerEngine.codex: 'codex',
+  AnswerEngine.interpret: 'interpret',
 };
 
 _Answer _$AnswerFromJson(Map<String, dynamic> json) => _Answer(

@@ -196,7 +196,8 @@ class _HistoryCardState extends ConsumerState<_HistoryCard> {
               if (summary.status != AnswerStatus.ready)
                 StatusBadge(status: summary.status),
               // Wrap 的 spacing 对零尺寸子项也生效，标准引擎下别留个空档。
-              if (summary.engine.isCodex) EngineBadge(engine: summary.engine),
+              if (summary.engine != AnswerEngine.ask)
+                EngineBadge(engine: summary.engine),
               if (summary.nTurns > 1)
                 Pill(
                   text: '${summary.nTurns} 轮',

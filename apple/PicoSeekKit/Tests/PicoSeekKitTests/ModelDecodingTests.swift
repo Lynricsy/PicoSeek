@@ -27,6 +27,21 @@ struct ModelDecodingTests {
         #expect(job.kind == .codex)
     }
 
+    /// 文献解读是第三个引擎：答案与后台任务都要认得，否则答案页整页解码失败。
+    @Test("interpret 的 engine 与 kind 可解码")
+    func interpretEngineAndJobKind() throws {
+        let summary = try decode(AnswerSummary.self, """
+        {"id":"a3","status":"ready","question":"梳理这组文献的组织关系与差异","engine":"interpret",
+        "created_at":"2026-09-08T10:00:00Z","n_turns":2}
+        """)
+        #expect(summary.engine == .interpret)
+
+        let job = try decode(Job.self, """
+        {"id":"j2","kind":"interpret","status":"running","created_at":"2026-09-08T10:00:00Z"}
+        """)
+        #expect(job.kind == .interpret)
+    }
+
     @Test("Answer 解出会话字段与检索轨迹")
     func decodesTrace() throws {
         let answer = try decode(Answer.self, """

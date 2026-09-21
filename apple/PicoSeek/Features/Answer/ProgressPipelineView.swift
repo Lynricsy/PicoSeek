@@ -8,19 +8,29 @@ struct ProgressPipelineView: View {
     let connection: JobLiveMonitor.Connection
     var useKb = true
     var engine: AnswerEngine = .ask
+    /// 阶段序列：文献解读只有「解析 PDF → 生成回答」两节点，其余引擎用问答流水线。
+    var steps: [StageKey] = StageKey.askPipeline
     var cancelRequested = false
     let onCancel: () -> Void
 
     /// 运行中的节点序列。写库节点恒为未开始：API 侧 `defer_kb=True`，
     /// 那一步排到答案交付之后才有后台任务可查。
     private var nodes: [RailNode] {
-        askRailNodes(live: live, useKb: useKb)
+        askRailNodes(live: live, useKb: useKb, steps: steps)
+    }
+
+    private var title: String {
+        switch engine {
+        case .interpret: "文献解读"
+        case .codex: "智能体检索"
+        case .ask: "正在生成答案"
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label(engine == .codex ? "智能体检索" : "正在生成答案", systemImage: "sparkles")
+                Label(title, systemImage: "sparkles")
                     .font(.headline)
                     .symbolEffect(.pulse)
                 Spacer()

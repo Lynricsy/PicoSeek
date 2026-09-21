@@ -103,14 +103,16 @@ private func kbNode(_ kb: BackgroundKb?) -> RailNode {
 
 /// 答案页与运行页共用的节点序列；`settled` 表示答案已出，前序阶段一律算完成
 /// （重新进入答案页时 SSE 实时状态是空的，不能让节点全灰）。
+/// `steps` 让文献解读传自己的两节点流水线，其余引擎用默认的问答流水线。
 /// 逐字移植 `frontend/src/components/ask/askRail.ts`。
 public func askRailNodes(
     live: JobLive,
     useKb: Bool,
     kb: BackgroundKb? = nil,
-    settled: Bool = false
+    settled: Bool = false,
+    steps: [StageKey] = StageKey.askPipeline
 ) -> [RailNode] {
-    let nodes = StageKey.askPipeline.map { stage in
+    let nodes = steps.map { stage in
         RailNode(
             key: stage.rawValue,
             label: stage.label,

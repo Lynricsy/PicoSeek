@@ -40,6 +40,13 @@ enum StageKey {
     StageKey.synthesize,
   ];
 
+  /// 文献解读的阶段顺序：解析上传 PDF → 生成综述或回答。
+  /// 首轮开了知识库时，写库同样是答案交付后的独立后台任务。
+  static const interpretPipeline = <StageKey>[
+    StageKey.fulltext,
+    StageKey.synthesize,
+  ];
+
   static StageKey? parse(String? raw) {
     for (final stage in StageKey.values) {
       if (stage.name == raw) return stage;

@@ -83,14 +83,17 @@ AskRailNode _kbNode(BackgroundKb? kb) {
 ///
 /// [settled] 表示答案已出：重新进入答案页时 SSE 状态是空的，
 /// 前序阶段一律按已完成渲染，否则节点会全灰。
+///
+/// [steps] 是阶段序列，默认问答流水线；文献解读传 [StageKey.interpretPipeline]。
 List<AskRailNode> askRailNodes(
   JobLive live, {
   required bool useKb,
   BackgroundKb? kb,
   bool settled = false,
+  List<StageKey> steps = StageKey.askPipeline,
 }) {
   final nodes = <AskRailNode>[
-    for (final stage in StageKey.askPipeline) _stageNode(live, stage, settled),
+    for (final stage in steps) _stageNode(live, stage, settled),
   ];
   return useKb ? [...nodes, _kbNode(kb)] : nodes;
 }

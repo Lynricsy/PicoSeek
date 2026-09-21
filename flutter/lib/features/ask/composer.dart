@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/tokens.dart';
+import '../../core/models/answers.dart';
 import '../../shared/widgets/surface.dart';
 import 'ask_state.dart';
 import 'engine_picker.dart';
@@ -23,6 +24,7 @@ class Composer extends ConsumerStatefulWidget {
     this.autofocus = false,
     this.hintText,
     this.mode = ComposerMode.ask,
+    this.sessionEngine,
     this.onFilterTap,
   });
 
@@ -34,6 +36,9 @@ class Composer extends ConsumerStatefulWidget {
   /// 未给时按 [mode] 取默认占位。
   final String? hintText;
   final ComposerMode mode;
+
+  /// 追问态下本次会话的引擎；未给时按智能体渲染。
+  final AnswerEngine? sessionEngine;
 
   /// 非空且 [mode] 为 [ComposerMode.ask] 时显示筛选摘要芯片。
   final VoidCallback? onFilterTap;
@@ -141,7 +146,9 @@ class _ComposerState extends ConsumerState<Composer> {
                 onChanged: (engine) => ref
                     .read(askFiltersControllerProvider.notifier)
                     .set(filters.copyWith(engine: engine)),
-                locked: widget.mode == ComposerMode.followUp,
+                lockedEngine: widget.mode == ComposerMode.followUp
+                    ? (widget.sessionEngine ?? AnswerEngine.codex)
+                    : null,
               ),
               if (showFilterChip) ...[
                 const SizedBox(width: PicoSeekTokens.space2),

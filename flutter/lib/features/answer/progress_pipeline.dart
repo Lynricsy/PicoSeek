@@ -12,6 +12,7 @@ import 'trace_list.dart';
 
 /// 任务进度。标准引擎是阶段流水线 + 当前阶段进度 + 检索摘要；
 /// 智能体引擎没有固定阶段，改用一行状态 + 检索轨迹。运行日志刻意不展示。
+/// 文献解读走流水线分支，只是阶段更少（由 [ProgressPipeline.steps] 决定）。
 class ProgressPipeline extends StatelessWidget {
   const ProgressPipeline({
     super.key,
@@ -21,6 +22,8 @@ class ProgressPipeline extends StatelessWidget {
     required this.onCandidateTap,
     this.onCancel,
     this.cancelRequested = false,
+    this.steps = StageKey.askPipeline,
+    this.title,
   });
 
   final JobLiveState state;
@@ -35,6 +38,12 @@ class ProgressPipeline extends StatelessWidget {
   /// 取消任务；为 null 时不显示取消入口（除非 [cancelRequested]）。
   final VoidCallback? onCancel;
   final bool cancelRequested;
+
+  /// 阶段序列：文献解读传 [StageKey.interpretPipeline]。
+  final List<StageKey> steps;
+
+  /// 面板标题；为 null 时按引擎取默认文案。
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +60,7 @@ class ProgressPipeline extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                codex ? '智能体检索' : '证据流水线',
+                title ?? (codex ? '智能体检索' : '证据流水线'),
                 style: theme.textTheme.labelLarge,
               ),
             ),
@@ -77,7 +86,7 @@ class ProgressPipeline extends StatelessWidget {
           // 写库不在这条流水线里：答案交付后才排后台任务，
           // 所以此刻它只是末尾一个「未开始」的节点。
           StageRail(
-            nodes: askRailNodes(live, useKb: useKb),
+            nodes: askRailNodes(live, useKb: useKb, steps: steps),
             progress: progress == null
                 ? null
                 : (

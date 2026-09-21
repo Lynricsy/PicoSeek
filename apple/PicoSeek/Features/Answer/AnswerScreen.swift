@@ -117,6 +117,7 @@ struct AnswerScreen: View {
                 connection: model.monitor?.connection ?? .idle,
                 useKb: AskFilters(options: answer.options).useKb,
                 engine: answer.engine,
+                steps: Self.railSteps(answer.engine),
                 cancelRequested: model.cancelRequested,
                 onCancel: { Task { await model.cancel() } }
             )
@@ -125,14 +126,15 @@ struct AnswerScreen: View {
             VStack(alignment: .leading, spacing: 28) {
                 // 答案已出：前序阶段一律按已完成渲染（重新进入本页时 SSE 实时状态是空的），
                 // 末尾的写库节点跟着后台任务走。
-                if let kb = model.backgroundKb, answer.engine == .ask,
+                if let kb = model.backgroundKb, answer.engine != .codex,
                    AskFilters(options: answer.options).useKb {
                     StageRailView(
                         nodes: askRailNodes(
                             live: model.monitor?.live ?? .empty,
                             useKb: true,
                             kb: kb,
-                            settled: true
+                            settled: true,
+                            steps: Self.railSteps(answer.engine)
                         )
                     ) { node in
                         if node.key == "kb", kb.status == .running, kb.total > 0 {
@@ -162,8 +164,9 @@ struct AnswerScreen: View {
                 if !answer.kbHits.isEmpty {
                     KbSupplementView(hits: answer.kbHits)
                 }
-                // 智能体的下一步是底部追问，不是把同一个问题再问一遍。
-                if answer.engine != .codex {
+                // 智能体的下一步是底部追问，不是把同一个问题再问一遍；
+                // 文献解读绑着上传的 PDF，重新提问也无从复现。
+                if answer.engine == .ask {
                     reaskButton(answer: answer, title: "重新提问")
                 }
             }
@@ -176,10 +179,10 @@ struct AnswerScreen: View {
                 )
                 .font(.headline)
                 .foregroundStyle(.red)
-                reaskButton(
-                    answer: answer,
-                    title: answer.engine == .codex ? "重新提问" : "放宽筛选后重新提问"
-                )
+                // 解读与智能体都不走筛选，重试只有回到提问框一条路。
+                if answer.engine == .ask {
+                    reaskButton(answer: answer, title: "放宽筛选后重新提问")
+                }
             }
             .card()
 
@@ -191,6 +194,11 @@ struct AnswerScreen: View {
         }
     }
 
+    /// 文献解读只解析 PDF 再成稿，节点序列与问答流水线不是一回事。
+    private static func railSteps(_ engine: AnswerEngine) -> [StageKey] {
+        engine == .interpret ? StageKey.interpretPipeline : StageKey.askPipeline
+    }
+
     private func reaskButton(answer: Answer, title: String) -> some View {
         Button(title) {
             app.reask(question: answer.question, options: answer.options)
@@ -200,16 +208,20 @@ struct AnswerScreen: View {
     }
 
     private var composer: some View {
-        // 智能体答完才谈得上续接；其余情况底部输入框就是「开一个新问题」。
-        let continuing = model.current.map { $0.engine == .codex && $0.status == .ready } ?? false
+        // 智能体与文献解读答完才谈得上续接；其余情况底部输入框就是「开一个新问题」。
+        let followUpEngine = model.current.flatMap { current -> AnswerEngine? in
+            guard current.status == .ready, current.engine != .ask else { return nil }
+            return current.engine
+        }
         return QuestionComposer(
             text: $followUp,
             placeholder: "继续提问…",
             pending: submitting,
-            mode: continuing ? .followUp : .ask,
+            mode: followUpEngine == nil ? .ask : .followUp,
+            sessionEngine: followUpEngine,
             collapsible: true,
             scrolledDown: collapse.scrolledDown,
-            onSubmit: continuing ? submitFollowUp : submitNew
+            onSubmit: followUpEngine == nil ? submitNew : submitFollowUp
         )
     }
 

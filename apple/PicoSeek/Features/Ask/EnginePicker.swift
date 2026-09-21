@@ -2,6 +2,7 @@ import SwiftUI
 import PicoSeekKit
 
 /// 引擎名称与一句话说明。三端同一份文案，用户在哪端读到的都是同一句。
+/// 文献解读只能由上传 PDF 创建，不进这份可选列表。
 struct EngineOption: Identifiable {
     let engine: AnswerEngine
     let title: String
@@ -33,12 +34,12 @@ struct EngineOption: Identifiable {
 /// 引擎选择器：胶囊菜单，放在提问框内与筛选芯片并列。
 struct EnginePicker: View {
     @Binding var engine: AnswerEngine
-    /// 追问态：引擎由会话决定，中途换不了，只显示当前是谁在答。
-    var locked = false
+    /// 追问态：引擎由会话决定，中途换不了，只显示当前是谁在答；`nil` 表示未锁定。
+    var lockedEngine: AnswerEngine?
 
     var body: some View {
-        if locked {
-            chip(symbol: "sparkles", title: "智能体 · 续接对话")
+        if let lockedEngine {
+            chip(symbol: Self.lockedSymbol(lockedEngine), title: Self.lockedTitle(lockedEngine))
                 .help("追问会沿用本次会话的引擎")
         } else {
             Menu {
@@ -82,15 +83,29 @@ struct EnginePicker: View {
         .background(.fill.tertiary, in: .capsule)
         .foregroundStyle(.secondary)
     }
+
+    /// 锁定态文案：解读续的是上传的那组 PDF，与智能体会话不是一回事。
+    private static func lockedTitle(_ engine: AnswerEngine) -> String {
+        engine == .interpret ? "文献解读 · 继续提问" : "智能体 · 续接对话"
+    }
+
+    private static func lockedSymbol(_ engine: AnswerEngine) -> String {
+        engine == .interpret ? "doc.text.magnifyingglass" : "sparkles"
+    }
 }
 
-/// 只有智能体才挂徽标：标准引擎是默认值，标出来只是噪音。
+/// 标准引擎不挂徽标：它是默认值，标出来只是噪音。
 struct EngineBadge: View {
     let engine: AnswerEngine
 
     var body: some View {
-        if engine == .codex {
+        switch engine {
+        case .ask:
+            EmptyView()
+        case .codex:
             Pill(text: "智能体", tone: .accentColor, systemImage: "sparkles")
+        case .interpret:
+            Pill(text: "解读", tone: .accentColor, systemImage: "doc.text.magnifyingglass")
         }
     }
 }

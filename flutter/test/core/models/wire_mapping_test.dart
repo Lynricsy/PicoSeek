@@ -121,6 +121,33 @@ void main() {
     expect(page.items.single.status, AnswerStatus.queued);
   });
 
+  test('interpret 引擎与 JobKind interpret 往返', () {
+    final answer = Answer.fromJson({
+      'id': 'a4',
+      'status': 'ready',
+      'question': '梳理这组文献的组织关系与差异',
+      'engine': 'interpret',
+      'created_at': '2026-09-06T14:20:57Z',
+      'options': {'mode': 'overview', 'n_files': 2, 'use_kb': true},
+      'papers': [
+        {'n': 1, 'title': '上传的论文', 'source': 'upload'},
+      ],
+    });
+    expect(answer.engine, AnswerEngine.interpret);
+    expect(answer.engine.supportsFollowUp, isTrue);
+    expect(answer.papers.single.source, PaperSource.upload);
+    expect(answer.options['mode'], 'overview');
+
+    final job = Job.fromJson({
+      'id': 'j',
+      'kind': 'interpret',
+      'status': 'running',
+      'created_at': '2026-09-06T14:20:57Z',
+    });
+    expect(job.kind, JobKind.interpret);
+    expect(job.toJson()['kind'], 'interpret');
+  });
+
   test('Problem.loc 混合类型与 LiteratureRecord.fulltextIdent', () {
     final problem = Problem.fromJson({
       'status': 422,

@@ -48,6 +48,8 @@ struct QuestionComposer: View {
     var pending = false
     var focused: FocusState<Bool>.Binding?
     var mode: ComposerMode = .ask
+    /// 追问时会话所属的引擎（智能体或文献解读），决定引擎芯片的锁定态文案。
+    var sessionEngine: AnswerEngine?
     /// 是否允许收起。提问首页的输入框是页面主体，必须常驻完整形态；
     /// 答案页的主体是答案正文，输入框要给它让位。
     var collapsible = false
@@ -95,7 +97,10 @@ struct QuestionComposer: View {
                 }
 
                 HStack(spacing: 8) {
-                    EnginePicker(engine: $app.filters.engine, locked: mode == .followUp)
+                    EnginePicker(
+                        engine: $app.filters.engine,
+                        lockedEngine: mode == .followUp ? (sessionEngine ?? .codex) : nil
+                    )
                     if mode == .ask {
                         filterChip
                     }

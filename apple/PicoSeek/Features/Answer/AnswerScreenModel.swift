@@ -132,8 +132,8 @@ final class AnswerScreenModel {
         if loaded.status == .ready, loaded.bodyMd == nil || loaded.bodyMd?.isEmpty == true {
             Task { await loadLegacyMarkdown() }
         }
-        // 会话脉络只对智能体有意义：首屏拉一次，本轮进终态后再拉一次拿到新回合的标题。
-        if loaded.engine == .codex, thread.isEmpty || !loaded.status.isActive {
+        // 会话脉络只对多轮引擎有意义：首屏拉一次，本轮进终态后再拉一次拿到新回合的标题。
+        if loaded.engine != .ask, thread.isEmpty || !loaded.status.isActive {
             Task { await loadThread() }
         }
         // 只有确认答案已进入终态才停轮询：终态刷新失败时轮询是唯一兜底。
@@ -185,7 +185,7 @@ final class AnswerScreenModel {
     /// 所以只有答案已出、且本轮开启了写库时才有东西可查。
     private func startKbTrackingIfNeeded() {
         guard kbTask == nil, let answer = current, let jobID = answer.jobId else { return }
-        guard answer.status == .ready, answer.engine == .ask,
+        guard answer.status == .ready, answer.engine != .codex,
               AskFilters(options: answer.options).useKb else { return }
         kbTask = Task { [weak self] in
             await self?.trackBackgroundKb(jobID: jobID)
