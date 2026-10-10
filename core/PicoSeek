@@ -20,11 +20,10 @@
 #   ./PicoSeek test                   不经过模型，直接测试文献检索工具
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV="${PICOSEEK_ENV:-$ROOT/.venv}"                     # 可用 PICOSEEK_ENV 指向 conda 环境
+ENV="${PICOSEEK_ENV:-$(cd "$ROOT/.." && pwd)/.venv}"   # 默认用仓库根 uv workspace 的 .venv；可用 PICOSEEK_ENV 指向其他环境
 PY="$ENV/bin/python"
-[ -x "$PY" ] || { echo "找不到 Python 环境: $PY"; echo "按 README §6.1 创建，或设 PICOSEEK_ENV=<环境目录>"; exit 1; }
+[ -x "$PY" ] || { echo "找不到 Python 环境: $PY"; echo "在仓库根执行 uv sync --all-packages 创建，或设 PICOSEEK_ENV=<环境目录>"; exit 1; }
 export PATH="$HOME/.local/bin:$ENV/bin:$PATH"
-export PYTHONPATH="$ROOT/vendor${PYTHONPATH:+:$PYTHONPATH}"   # vendor 自带 pypdf / playwright
 export LOCAL_QWEN_KEY="${LOCAL_QWEN_KEY:-sk-123456}"   # 需与 litellm_config.yaml 的 master_key 一致
 # export S2_API_KEY=""                                 # 可选：Semantic Scholar key
 cd "$ROOT"

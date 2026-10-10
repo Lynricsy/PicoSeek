@@ -1082,7 +1082,7 @@ curl -s -X POST -H 'Authorization: Bearer <admin_access_token>' \
 
 - **无通用业务限流。** 登录有用户名窗口限流，创建问答按用户限制活跃任务数；其余业务接口没有每秒/分钟配额。
 - **无注册、租户或复杂角色。** 账号由管理员创建，只有 `user`/`admin`，不提供邮件找回、第三方登录、JWT 刷新令牌、组织或角色编辑。文献和衍生知识共享，不承诺严格隐私隔离。
-- **容器内不支持机构订阅下载。** 镜像不包含 `core/vendor/`，因此 v1 容器服务不会通过机构订阅抓取付费全文；开放全文仅使用 Europe PMC，问答流水线在无全文时可使用摘要。本机原有 CLI 内核的机构订阅能力不属于本 API 协议。
+- **不在应用内代理机构登录。** runtime 镜像已带 playwright 与 Chromium，管理员经 `PUT /v1/paywall/state` 上传登录态后，问答流水线可走机构订阅下载；登录本身只能在有桌面的机器上用 CLI `paywall login` 完成。开放全文仅使用 Europe PMC，问答流水线在无全文时可使用摘要。
 - **全文透传不下载 OA PDF 兜底。** `/v1/literature/fulltext?ident=...` 只读 Europe PMC；`LiteratureRecord.open_access_pdf` 即使存在，也只是上游元数据。
 
 ## 10. 契约迁移

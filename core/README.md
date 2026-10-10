@@ -129,8 +129,7 @@ PicoSeek/
 ├── models/                  embedding 模型（bge-m3，不入库，见 §6.1 重建）
 ├── pdfs/                    本地 PDF（手动放入或 paywall 下载，不入库）
 ├── var/                     运行状态（API 数据库、机构订阅登录态 sd_state.json；不入库）
-├── logs/                    服务日志
-└── vendor/                  项目自带的 Python 依赖（pypdf / playwright），不污染 conda 环境
+└── logs/                    本机模型服务日志（不入库）
 ```
 
 ## 4. 怎么证明答案不是编的
@@ -149,7 +148,7 @@ PicoSeek/
 | 机构订阅 | 需先在**有显示器的机器**上登录一次生成 `sd_state.json`，见下 |
 | 本地 PDF | 放到 `pdfs/`，Codex 里说 "用 read_pdf 读 xxx.pdf" |
 
-`ask` 流水线的自动级联只有前三级：PMC XML → Unpaywall PDF → 机构订阅 PDF（需 `sd_state.json`），都拿不到就退回摘要。**`pdfs/` 下的本地 PDF 不参与该级联**，只是 Codex/MCP `read_pdf` 的输入。机构订阅那级还要求 `vendor/` 里的 playwright 可导入，容器镜像不含 `vendor/`，故只有本机 CLI 走得通。
+`ask` 流水线的自动级联只有前三级：PMC XML → Unpaywall PDF → 机构订阅 PDF（需 `sd_state.json`），都拿不到就退回摘要。**`pdfs/` 下的本地 PDF 不参与该级联**，只是 Codex/MCP `read_pdf` 的输入。机构订阅那级需要 playwright 与 Chromium：runtime 镜像已安装；本机需在仓库根执行一次 `uv run playwright install chromium`。
 
 机构订阅登录（一次性）：
 ```bash
@@ -165,8 +164,7 @@ scp sd_state.json* tx@10.107.231.69:/data1/qyy/smk/
 
 ## 6. 环境与配置
 
-- Python 环境：默认 `<项目根>/.venv`，用 `PICOSEEK_ENV` 可指向任意 conda/venv 目录（`PicoSeek` 与 `scripts/*.sh` 共用此变量，缺失时直接报错退出）
-- `vendor/` 由 `PicoSeek` 统一加进 `PYTHONPATH`，无需在环境里另装 pypdf / playwright
+- Python 环境：默认仓库根 uv workspace 的 `.venv`（仓库根执行 `uv sync --all-packages`，pypdf / playwright / mcp / torch / sentence-transformers 均由它安装）；用 `PICOSEEK_ENV` 可指向任意 conda/venv 目录（`PicoSeek` 与 `scripts/*.sh` 共用此变量，缺失时直接报错退出）
 - Qwen3 权重：默认 `<项目根>/models/Qwen/Qwen3-14B`、`.../Qwen3-4B`，可用 `QWEN3_14B` / `QWEN3_4B` 覆盖；`vllm`、`litellm` 需装在 `PICOSEEK_ENV` 指向的环境里（vLLM 需 NVIDIA GPU）
 - Codex CLI 在 `~/.local/bin/codex`
 - `LOCAL_QWEN_KEY` 需等于 `litellm_config.yaml` 的 `master_key`（`PicoSeek` 已默认设置）
@@ -201,7 +199,7 @@ python knowledge_store.py stats
 python knowledge_store.py search "SGLT2 HFpEF 心衰住院"
 ```
 
-> 装在默认的 `<项目根>/.venv` 时，`./PicoSeek kb ...` 直接可用；装在别处则设 `PICOSEEK_ENV=<环境目录>`。
+> 用仓库根的 workspace `.venv` 时，`./PicoSeek kb ...` 直接可用；装在别处则设 `PICOSEEK_ENV=<环境目录>`。
 
 > **本节及下面两节的命令都不会读 `.env`。** `knowledge_store.py` 只认 `os.environ`，
 > 没有 dotenv 加载；所以直接 `python knowledge_store.py ...` 拿到的是各变量的默认值

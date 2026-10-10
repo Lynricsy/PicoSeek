@@ -24,7 +24,6 @@ import time
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(ROOT, "vendor"))
 sys.path.insert(0, ROOT)
 
 from spider_auth import (  # noqa: E402  (vendored from SPIDER_PROJECT/medical_scraper/human_auth.py)

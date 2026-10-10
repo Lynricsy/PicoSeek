@@ -9,7 +9,6 @@ core/kb
 core/models
 core/logs
 core/pdfs
-core/vendor
 core/.backup
 core/.bak_rename
 core/*.bak_*

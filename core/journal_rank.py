@@ -255,7 +255,7 @@ def label(info: Optional[dict]) -> str:
 # ---------------------------------------------------------------- download (SCImago via Playwright)
 def download_scimago(year: int, dest_dir: str = DATA_DIR) -> str:
     """Fetch the SCImago journal-rank CSV for `year` through a headless browser (Cloudflare-protected site)."""
-    # playwright 由 core[paywall] extra 提供；CLI 场景 PicoSeek 已 export PYTHONPATH=vendor
+    # playwright 由 core[paywall] extra 提供（backend 依赖已带上，workspace .venv 与镜像均有）
     from playwright.sync_api import sync_playwright  # type: ignore
 
     os.makedirs(dest_dir, exist_ok=True)

@@ -3,7 +3,7 @@
 set -e
 SIZE="${1:-14b}"; GPU="${2:-2}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV="${PICOSEEK_ENV:-$ROOT/.venv}"
+ENV="${PICOSEEK_ENV:-$(cd "$ROOT/.." && pwd)/.venv}"
 case "$SIZE" in
   14b) MODEL="${QWEN3_14B:-$ROOT/models/Qwen/Qwen3-14B}"; NAME=Qwen3-14B; EXTRA="--reasoning-parser qwen3";;
   4b)  MODEL="${QWEN3_4B:-$ROOT/models/Qwen/Qwen3-4B}";   NAME=Qwen3-4B;  EXTRA="";;
