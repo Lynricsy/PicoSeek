@@ -46,15 +46,16 @@
 
 按影响排序。
 
-1. **宿主机重启后应用不会自启。** `compose.yaml` 的 `redis`、`api`、`worker`、`web` 都没有 `restart` 策略，只有 `compose.qwen.yaml` 的 `llm-tunnel` 是 `unless-stopped`。2026-09-21 与 2026-10-07 两次重启后站点都停在 502，需要人工 `docker compose up -d`。修复方式是给这四个服务加 `restart: unless-stopped`。
-2. **公开仓库里有内部基础设施信息。** `docs/model-server.md` 与 `core/README.md` 含 ZeroTier 内网地址、主机路径、用户名与主机指纹；它们此前已在 README 中公开，Git 历史里也有。隧道公钥已用 `restrict`/`permitopen` 限权，但若要收紧，需要把仓库转私有或改写历史。
-3. **codex 引擎没有租户隔离。** `sandbox=read-only` 不限制读取范围，模型可读到容器内任何对运行用户可读的文件；对外开放多租户前必须在容器/进程层面隔离（[architecture.md](architecture.md#codex-运行时)）。
-4. **知识库跨用户共享。** 问答私有，但文献、事实与向量索引共享，且抽取以问题为上下文，不是严格的隐私隔离。
-5. **CLI 的 `ask`、`codex` 子命令只认本机 LiteLLM。** `core/PicoSeek` 的 `require_services` 硬编码探测 `http://127.0.0.1:4000/v1/models`，即使 `LLM_BASE` 指向别处也会拒绝运行；`start`/`stop`/`status`/`logs` 与 `core/scripts/`、`core/litellm_config.yaml` 是早期本机 Qwen3-14B 方案，生产不使用。CLI 的 `kb`、`rank`、`paywall`、`test`、`verify` 不受影响。
-6. **客户端发布签名缺失。** Flutter Android release 用 debug 签名（不能上架、不能与正式包互相覆盖）；Apple 只有 ad-hoc 签名与 CI 未签名 IPA。
-7. **同一逻辑多份实现。** 答案分节有四份（后端 + 三端），筛选、引用、事件归约等纯逻辑在 Apple、Flutter、Web 各一份，靠同源测试用例约束，改动要同步（[development.md](development.md#跨端同源逻辑)）。
-8. **embedding 只装了 CPU 版 PyTorch。** GPU 部署需改 `pytorch-cpu` 索引后重新 `uv lock`。
-9. **遗留清理项。** 改名前的 Redis 卷 `yaopenevidence_redis-data` 作为回滚保留，确认无需回滚后可删；本机 `backend/api_keys.toml` 已不被读取；`core/.venv` 是 vendor 时代的本机环境，CLI 现默认用仓库根 `.venv`。
+1. **公开仓库里有内部基础设施信息。** `docs/model-server.md` 与 `core/README.md` 含 ZeroTier 内网地址、主机路径、用户名与主机指纹；它们此前已在 README 中公开，Git 历史里也有。隧道公钥已用 `restrict`/`permitopen` 限权，但若要收紧，需要把仓库转私有或改写历史。
+2. **codex 引擎没有租户隔离。** `sandbox=read-only` 不限制读取范围，模型可读到容器内任何对运行用户可读的文件；对外开放多租户前必须在容器/进程层面隔离（[architecture.md](architecture.md#codex-运行时)）。
+3. **知识库跨用户共享。** 问答私有，但文献、事实与向量索引共享，且抽取以问题为上下文，不是严格的隐私隔离。
+4. **CLI 的 `ask`、`codex` 子命令只认本机 LiteLLM。** `core/PicoSeek` 的 `require_services` 硬编码探测 `http://127.0.0.1:4000/v1/models`，即使 `LLM_BASE` 指向别处也会拒绝运行；`start`/`stop`/`status`/`logs` 与 `core/scripts/`、`core/litellm_config.yaml` 是早期本机 Qwen3-14B 方案，生产不使用。CLI 的 `kb`、`rank`、`paywall`、`test`、`verify` 不受影响。
+5. **客户端发布签名缺失。** Flutter Android release 用 debug 签名（不能上架、不能与正式包互相覆盖）；Apple 只有 ad-hoc 签名与 CI 未签名 IPA。
+6. **同一逻辑多份实现。** 答案分节有四份（后端 + 三端），筛选、引用、事件归约等纯逻辑在 Apple、Flutter、Web 各一份，靠同源测试用例约束，改动要同步（[development.md](development.md#跨端同源逻辑)）。
+7. **embedding 只装了 CPU 版 PyTorch。** GPU 部署需改 `pytorch-cpu` 索引后重新 `uv lock`。
+8. **遗留清理项。** 改名前的 Redis 卷 `yaopenevidence_redis-data` 作为回滚保留，确认无需回滚后可删；本机 `backend/api_keys.toml` 已不被读取；`core/.venv` 是 vendor 时代的本机环境，CLI 现默认用仓库根 `.venv`。
+
+2026-09-21 与 2026-10-07 两次宿主机重启后站点停在 502，原因是长驻服务没有 `restart` 策略；2026-10-10 已给 `redis`、`api`、`worker`、`web` 加上 `restart: unless-stopped`。
 
 ## 接手检查清单
 

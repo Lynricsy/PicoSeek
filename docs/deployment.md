@@ -149,7 +149,7 @@ docker compose run --rm api picoseek import-answers
 
 | 现象 | 原因与处理 |
 |---|---|
-| 宿主机重启后站点 502 / 打不开 | `compose.yaml` 的服务没有 `restart` 策略，只有 `llm-tunnel` 会自启。执行 `docker compose up -d`，再查就绪检查。 |
+| 宿主机重启后站点 502 / 打不开 | 长驻服务都是 `restart: unless-stopped`；若有人手动 `docker compose stop` 过，重启后不会自启。执行 `docker compose up -d`，再查就绪检查。 |
 | 改了源码但线上行为没变 | 镜像是 `COPY` 构建的，见[发布代码改动](#发布代码改动)。 |
 | 就绪检查 `llm` 失败，隧道容器 healthy | 隧道连接可能停滞：`docker compose restart llm-tunnel`。报 `administratively prohibited` 说明跳板 `permitopen` 未放行目标。 |
 | KB 索引与 embedder 不一致（`EmbedderMismatch`） | 管理员调用 `POST /v1/kb/reindex`，或在 `core/` 下 `./PicoSeek kb reindex`。不要用一套 embedding 读另一套索引。 |
