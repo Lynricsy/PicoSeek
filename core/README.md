@@ -1,24 +1,27 @@
-本文是 CLI 内核的详细文档；项目整体定位、HTTP API 与部署见仓库根目录的 [README](../README.md)，协议见 [API 文档](../docs/api.md)。
+# PicoSeek 内核与本机 CLI
 
-# PicoSeek — 本地大模型医学文献问答 Demo
+`core/` 是 `picoseek-core` 包：检索、全文获取与解析、PICOS 逐篇阅读、引文核实、原子知识库与期刊分区。HTTP 后端与 worker 直接 import 这里的模块；`./PicoSeek` 是同一套代码的本机命令行入口。整体架构见 [docs/architecture.md](../docs/architecture.md)，部署见 [docs/deployment.md](../docs/deployment.md)。
 
 **问一个临床问题 → 自动检索 PubMed / Europe PMC → 下载全文 → 模型逐篇阅读 → 输出带编号引用、可核对的答案。**
-全程在本地 GPU 上运行（Qwen3-14B），不依赖任何云端大模型。
 
 ```
 问题 ──> ask.py 流水线 ──> PubMed / Europe PMC 检索
                        ├─> 全文下载：PMC XML → Unpaywall PDF → 机构订阅 PDF（可选）
-                       ├─> Qwen3-14B 逐篇阅读做笔记（vLLM :8000 ← LiteLLM :4000）
+                       ├─> 模型逐篇阅读做笔记（LLM_BASE，CLI 默认 LiteLLM :4000）
                        └─> 综合成答案  answers/<时间戳>.md  +  answers/<时间戳>_papers/（原文 + 笔记）
 
 Codex CLI ──(Responses API)──> LiteLLM :4000 ──> vLLM :8000
    └── MCP: semantic_scholar_mcp.py（Semantic Scholar / PubMed / Europe PMC 全文 / 本地 PDF）
 ```
 
-## 1. 快速开始（演示流程）
+> CLI 的 `ask`、`codex` 子命令在运行前固定探测 `http://127.0.0.1:4000/v1/models`，即要求本机有 LiteLLM 代理（`./PicoSeek start` 会连同 vLLM 一起拉起，这是早期本机 Qwen3-14B 方案，生产不使用）。`kb`、`rank`、`paywall`、`test`、`verify` 不需要模型服务。
+
+## 1. 快速开始
+
+先在仓库根执行 `uv sync --all-packages` 创建 `.venv`，然后：
 
 ```bash
-cd <项目根>              # 本仓库为 core/
+cd core
 ./PicoSeek start          # 启动 vLLM + LiteLLM（tmux 后台，模型加载约 1–3 分钟）
 ./PicoSeek status         # 等到 vLLM 和 LiteLLM 都列出模型名
 ./PicoSeek ask "SGLT2抑制剂对HFpEF患者有什么获益？"
@@ -78,9 +81,9 @@ cd <项目根>              # 本仓库为 core/
 原子知识 = 模型从全文抽出的一句话事实（含人群/干预/对照/结局/数字，中英双语），每条带来源段落 `pid` 和逐字 `quote`，并经过同样的核实。
 所有事实和段落向量化后追加到 `kb/`（bge-m3 embedding，模型放在 `models/BAAI/bge-m3`；没有模型时退化为哈希词袋向量）。
 
-索引保存为单个 `kb/index.npz` 快照，旧三文件索引会在下次入库时迁移。CLI 与 HTTP worker 共用 `kb.lock`，串行执行增量写入和重建；重建期间检索仍可读取完整的旧代。共享目录与文件锁的部署要求见[项目说明](../README.md#cli-与-api-共存)。
+索引保存为单个 `kb/index.npz` 快照，旧三文件索引会在下次入库时迁移。CLI 与 HTTP worker 共用 `kb.lock`，串行执行增量写入和重建；重建期间检索仍可读取完整的旧代。共享目录与文件锁的部署要求见[架构说明](../docs/architecture.md#知识库与-cli-共存)。
 
-本机 `PicoSeek ask` 保持同步抽取与入库。通过 API 执行的 `ask` 则先交付答案，另建持久的 `answer_kb` 任务后台入库，不让事实抽取与嵌入计算阻塞答案阅读；关闭 `use_kb` 时不会创建该任务。后台依赖逐篇原文快照、事实检查点与数据库游标恢复，不会在重试时重写已经交付的答案，详见[项目架构说明](../README.md#架构)。
+本机 `PicoSeek ask` 保持同步抽取与入库。通过 API 执行的 `ask` 则先交付答案，另建持久的 `answer_kb` 任务后台入库，不让事实抽取与嵌入计算阻塞答案阅读；关闭 `use_kb` 时不会创建该任务。后台依赖逐篇原文快照、事实检查点与数据库游标恢复，不会在重试时重写已经交付的答案，详见[架构说明](../docs/architecture.md#答案先交付知识后台入库)。
 
 ```bash
 ./PicoSeek kb search "SGLT2 HFpEF 心衰住院"     # 语义检索（中英文均可）
@@ -105,32 +108,30 @@ Codex 模式下对应工具：`kb_search`。
 ## 3. 目录结构
 
 ```
-PicoSeek/
-├── PicoSeek                      统一入口脚本（上表所有命令）
-├── scripts/                 由 PicoSeek start 调用的底层启动脚本
+core/
+├── PicoSeek                 统一入口脚本（上表所有命令）
+├── scripts/                 由 PicoSeek start 调用的本机模型启动脚本
 │   ├── vllm.sh                vLLM 服务（:8000）
 │   └── litellm.sh             LiteLLM 代理（:4000）
+├── litellm_config.yaml      LiteLLM 配置
+├── picos_paths.py           数据目录约定（PICOSEEK_DATA 及其子目录）
 ├── ask.py                   一键流水线主程序（筛选 / 段落定位 / 知识抽取）
 ├── ingest.py                单篇入库（上传 PDF 或按 DOI 经机构访问下载 → 分段 → 抽事实 → library + kb）
 ├── interpret.py             文献解读（一组上传 PDF → 解析 → 综述 / 问答；HTTP 专用，无 CLI 入口）
+├── literature.py            上游文献检索（Semantic Scholar / PubMed / Europe PMC）
 ├── journal_rank.py          期刊分区表加载与查询（SCImago / 自定义中科院分区 CSV）
 ├── knowledge_store.py       段落切分、引文核实、原子知识抽取、向量知识库
 ├── semantic_scholar_mcp.py  Codex 用的 MCP 工具服务（检索 / 全文 / 本地 PDF / kb_search）
 ├── paywall_fetch.py         机构订阅全文下载（Playwright）
 ├── spider_auth.py           拦截页 / 登录态检测（来自 SPIDER_PROJECT）
 ├── verify_citations.py      引用核对
-├── test_mcp.py / test_fulltext.py   工具自测
-├── litellm_config.yaml      LiteLLM 配置
-├── AGENTS.md                Codex 的系统指令（检索工作流 + 回答格式）
-├── answers/                 每次问答的输出（归档时的历史输出已入库，新输出不入库）
-├── library/                 持久保存的每篇文献（全文 + 段落 + 原子知识；归档时的种子文献已入库，是 `kb reindex` 的数据源，新增文献不入库）
-├── kb/                      向量知识库（index.npz：整份索引一个文件，换代靠一次 rename；不入库，用 `kb reindex` 从 library/ 重建）
-├── data/journal_ranks/      期刊分区表
-├── models/                  embedding 模型（bge-m3，不入库，见 §6.1 重建）
-├── pdfs/                    本地 PDF（手动放入或 paywall 下载，不入库）
-├── var/                     运行状态（API 数据库、机构订阅登录态 sd_state.json；不入库）
-└── logs/                    本机模型服务日志（不入库）
+├── test_mcp.py              不经模型的检索工具自测（./PicoSeek test）
+├── AGENTS.md                Codex 的系统指令（检索工作流 + 回答格式），CLI 与 codex 引擎共用
+├── tests/                   pytest 用例
+└── data/journal_ranks/      期刊分区表（scimagojr_2024.csv 入库）
 ```
+
+本地未设置 `PICOSEEK_DATA` 时，运行期数据也落在 `core/` 下且均不入库：`answers/`、`library/`（`kb reindex` 的数据源）、`kb/`（`index.npz`，换代靠一次 rename）、`docsets/`、`models/`（见 §6.1）、`pdfs/`、`var/`、`logs/`。各目录内容见 [architecture.md § 数据目录](../docs/architecture.md#数据目录)。
 
 ## 4. 怎么证明答案不是编的
 
@@ -153,9 +154,9 @@ PicoSeek/
 机构订阅登录（一次性）：
 ```bash
 # 在有浏览器的机器上：
-python paywall_fetch.py login --url https://www.sciencedirect.com/
+./PicoSeek paywall login --url https://www.sciencedirect.com/
 # 浏览器弹出 → 机构登录（OpenAthens / Shibboleth / CARSI）→ 打开一篇付费文章确认能看全文 → 回终端按 Enter
-scp sd_state.json* tx@10.107.231.69:/data1/qyy/smk/
+# 把生成的 sd_state.json 及两份伴随文件拷到服务器的 $PICOSEEK_DATA/var/（Compose 部署改走 Web 的 /admin/institution 上传）
 # 服务器上验证：
 ./PicoSeek paywall get 10.1016/j.jacc.2023.10.021
 ```
@@ -175,31 +176,28 @@ scp sd_state.json* tx@10.107.231.69:/data1/qyy/smk/
 
 ### 6.1 embedding 环境（`kb` 子命令，无 GPU 亦可）
 
-`models/`（约 2.2G 权重）与虚拟环境均不入库，需按下面安装。任选 conda/venv/uv，只要满足 **Python 3.12**（torch 尚无 3.13+ 轮子）：
+`models/`（约 2.2G 权重）不入库。torch（CPU wheel）与 sentence-transformers 已由仓库根 `uv sync --all-packages` 装进 workspace `.venv`（`core[embed]`，Python 3.12）；只需下载模型：
 
 ```bash
-cd <项目根>                            # 即 knowledge_store.py 所在目录
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu   # 有 GPU 则装对应 CUDA 版
-python -m pip install sentence-transformers
-python -c "from huggingface_hub import snapshot_download as d; \
+cd core
+uv run python -c "from huggingface_hub import snapshot_download as d; \
   d('BAAI/bge-m3', local_dir='models/BAAI/bge-m3', \
     ignore_patterns=['onnx/*','*.onnx','*.onnx_data'])"
 ```
 
-- 目标路径固定为 `<项目根>/models/BAAI/bge-m3`（`knowledge_store.py` 的 `EMBED_MODEL` 默认值，可用同名环境变量覆盖）。
+- 目标路径固定为 `<PICOSEEK_DATA>/models/BAAI/bge-m3`（本地即 `core/models/BAAI/bge-m3`；`knowledge_store.py` 的 `EMBED_MODEL` 默认值，可用同名环境变量覆盖）。
 - 末级目录名必须正好是 `bge-m3`：`Embedder` 的后端名取自 `os.path.basename(model_path)`，要与索引里记的 `"embedder": "bge-m3"` 一致。
 - 排除 `onnx/`：上游的 `onnx/model.onnx_data` 单独 2.27G，与 `pytorch_model.bin` 是同一模型的另一份格式，默认的 torch 后端只读 `.bin`。排除后约 2.2G。想用 ONNX 后端不需要下它，按 §6.3 自己导出 int8 权重（约 570M）即可。
 - 无 GPU 无需改代码，`Embedder` 只在 `torch.cuda.is_available()` 为真时才切 GPU；CPU 路径的调优见 §6.2。
 - **装完必须验证**：缺模型或缺 torch 时 `Embedder` 只打一行 log 就静默退化成 `hash-bow-v1`(4096 维)。它与索引里记的 `bge-m3` 不是同一后端，`search` / `add_paper` 会抛 `EmbedderMismatch` 并说明该重建还是该修环境——但**报错时机是第一次读写**，所以别等到那会儿才发现。
 
 ```bash
-python -c "from knowledge_store import Embedder; e=Embedder(); print(e.name, e.dim)"
+cd core
+uv run python -c "from knowledge_store import Embedder; e=Embedder(); print(e.name, e.dim)"
 # 必须打印: bge-m3 1024   （打印 hash-bow-v1 4096 就是没加载上）
-python knowledge_store.py stats
-python knowledge_store.py search "SGLT2 HFpEF 心衰住院"
+./PicoSeek kb stats
+./PicoSeek kb search "SGLT2 HFpEF 心衰住院"
 ```
-
-> 用仓库根的 workspace `.venv` 时，`./PicoSeek kb ...` 直接可用；装在别处则设 `PICOSEEK_ENV=<环境目录>`。
 
 > **本节及下面两节的命令都不会读 `.env`。** `knowledge_store.py` 只认 `os.environ`，
 > 没有 dotenv 加载；所以直接 `python knowledge_store.py ...` 拿到的是各变量的默认值
