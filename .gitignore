@@ -26,12 +26,16 @@ backend/api_keys.toml
 # 知识库跨进程写锁（运行期间不得删除）
 core/kb.lock
 
-# core 运行期数据（本地积累，不入库；已随 smk 归档提交的种子数据仍保持跟踪）
+# core 运行期数据（PICOSEEK_DATA 默认落在 core/，均不入库）
 core/answers/
 core/library/
 core/kb/
 core/pdfs/
 core/models/
+core/logs/
+
+# Python 打包元数据
+*.egg-info/
 
 # Web 构建产物
 frontend/node_modules/
