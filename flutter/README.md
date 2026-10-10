@@ -92,6 +92,8 @@ fvm flutter test                     # 单元测试
 
 视觉基准是 iOS 版的 `apple/PicoSeek/Components/Surface.swift`；令牌集中在 `lib/app/theme/tokens.dart`，组件外观集中在 `lib/app/theme/app_theme.dart` 的 `buildTheme`，页面不再手写 `Container + BoxDecoration`。
 
+布局三档自适应：`< 768` 底部导航 + 「更多」表单；`768–1279` 折叠图标侧栏；`≥ 1280` 240 px 可折叠侧栏（`Ctrl/Cmd+B`），答案与原文可并排分栏（分隔条可拖拽，比例持久化）。
+
 | 原语 | 位置 | 用途 |
 |---|---|---|
 | `PicoSeekCard` | `shared/widgets/surface.dart` | 内容卡：圆角 16、无描边、两层柔和阴影；`tint` 参数给语义提示卡（底 10% + 描边 28%、无阴影），`elevated: false` 给次级卡 |
