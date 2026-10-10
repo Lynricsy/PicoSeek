@@ -13,6 +13,8 @@
 
 部署与日常运维步骤见 [deployment.md](deployment.md)。
 
+**生产目录就是本仓库在这台机器上的工作目录**：不要在其中运行假 LLM 快速开始或其他实验性 Compose 命令，也不要用 `git worktree` 在本机开分支做验证（会软链接到生产数据）。需要在这台机器上验证时按 [development.md § 隔离验证](development.md#隔离验证) 操作。
+
 ## 不在 Git 里的状态
 
 迁移或重建生产时，下面这些必须单独备份或交接：

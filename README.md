@@ -30,8 +30,11 @@ PicoSeek 是医学文献证据问答系统：从临床或科研问题出发，�
 
 用确定性的假 LLM 在本机跑起整套服务，不需要 GPU，但需要 Docker Compose 和能访问 PubMed、Europe PMC 的网络。
 
+> **只在一份全新、数据独立的开发克隆里执行，禁止在生产目录（或其 worktree）运行。** 这组命令使用默认 Compose 项目名、`picoseek:local` 镜像标签和 `core/`、`var/` bind mount，在生产目录执行会覆盖生产配置并把线上切到假模型。在生产宿主机上验证的做法见 [development.md § 隔离验证](docs/development.md#隔离验证)。
+
 ```bash
-cp .env.example .env
+find . -path ./.git -prune -o -type l -print   # 必须没有输出：不能有指向其他目录的软链接
+[ -e .env ] || [ -L .env ] || cp .env.example .env   # 已有 .env（含软链接）时不覆盖
 mkdir -p var core/pdfs
 docker compose -f compose.yaml -f compose.fake-llm.yaml up -d --build
 docker compose exec api picoseek create-admin admin    # 交互输入两次密码

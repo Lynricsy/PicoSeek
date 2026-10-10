@@ -11,7 +11,7 @@
 ## 1. 准备配置和目录
 
 ```bash
-cp .env.example .env
+[ -e .env ] || [ -L .env ] || cp .env.example .env   # 已有 .env（含软链接）时不覆盖
 mkdir -p var core/pdfs
 ```
 

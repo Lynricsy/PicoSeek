@@ -37,7 +37,7 @@ docker compose --profile test run --rm test
 
 ## 无 GPU 的端到端验证
 
-`compose.fake-llm.yaml` 启动 `backend/tests/fake_llm.py` 提供的确定性假 LLM，并让 API 与 worker 指向它：
+`compose.fake-llm.yaml` 启动 `backend/tests/fake_llm.py` 提供的确定性假 LLM，并让 API 与 worker 指向它。**只在全新、数据独立的开发克隆中执行，禁止在生产目录运行**：它与生产共用默认项目名、镜像标签和 `core/`、`var/` bind mount，会把线上切到假模型。
 
 ```bash
 docker compose -f compose.yaml -f compose.fake-llm.yaml up -d --build
@@ -46,6 +46,15 @@ docker compose -f compose.yaml -f compose.fake-llm.yaml up -d --build
 假 LLM 同时提供 `/v1/chat/completions`（`ask`）与 `/v1/responses`（`codex`），两个引擎都能跑通；文献检索与全文获取仍需访问 PubMed 和 Europe PMC。
 
 验证 codex 工具闭环：提问里带 `TOOLTEST_PDF=<pdfs/ 下的文件名>`，假模型第一轮会真的调 MCP 的 `read_pdf`，第二轮把工具返回的原文抄进答案。据此可断言 `Answer.trace` 非空（`tool` 为 `read_pdf`、`status` 为 `completed`）且答案含 PDF 原文。
+
+### 隔离验证
+
+需要在生产宿主机上验证时（例如核对 README 快速开始），以下几点缺一不可：
+
+1. 用 `git clone` 到新目录，不要用 `git worktree add`：本机的 worktree 扩展会把被忽略的文件（`.env`、`var/`、`core/answers/` 等）做成指向生产目录的软链接，往里写文件会直接改到生产。克隆后先跑 `find . -path ./.git -prune -o -type l -print`，有输出就先删掉这些链接。
+2. 克隆放在 `/root` 下而不是 `/tmp`：Docker 守护进程看到的 `/tmp` 与登录 shell 不同，bind mount 会挂到空目录。
+3. 改 `.env` 里的 `PICOSEEK_PORT`、`PICOSEEK_WEB_PORT`，用 `-p <独立项目名>` 启动，并加一个覆盖文件把 `migrate`/`api`/`worker`/`fake-llm`/`web`/`test` 的 `image:` 改成独立标签，否则构建会覆盖生产在用的 `picoseek:local`、`picoseek-web:local`。
+4. 验证完 `docker compose -p <独立项目名> ... down -v`，删除独立镜像和克隆目录。
 
 ## Amp orbs
 
